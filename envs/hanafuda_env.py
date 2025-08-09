@@ -1,6 +1,6 @@
 import gymnasium as gym
 import numpy as np
-from .rules import HanafudaRules
+from hanafuda_rl.envs.rules import HanafudaRules
 
 class HanafudaEnv(gym.Env):
     """花札Gymnasium环境"""
