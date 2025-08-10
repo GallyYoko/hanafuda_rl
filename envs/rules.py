@@ -157,6 +157,7 @@ class Deck:
         发牌逻辑：
         - 返回玩家手牌（2×8张）、场牌（8张）、剩余牌堆。
         - 支持随机或确定性发牌（通过seed参数）。
+        - 手牌和场牌按card_id排序。
         """
         if seed is not None:
             random.seed(seed)
@@ -164,11 +165,11 @@ class Deck:
         shuffled_cards = random.sample(self.cards, len(self.cards))
 
         # 玩家手牌（每人8张）
-        player1_hand = shuffled_cards[:8]
-        player2_hand = shuffled_cards[8:16]
+        player1_hand = sorted(shuffled_cards[:8], key=lambda card: card.card_id)
+        player2_hand = sorted(shuffled_cards[8:16], key=lambda card: card.card_id)
 
         # 场牌（8张）
-        table_cards = shuffled_cards[16:24]
+        table_cards = sorted(shuffled_cards[16:24], key=lambda card: card.card_id)
 
         # 剩余牌堆
         draw_pile = shuffled_cards[24:]
@@ -276,6 +277,8 @@ class HanafudaRules:
         else:
             # 没有配对，将牌加入场牌
             self.table_cards.append(card_to_play)
+            # 对场牌按card_id排序
+            self.table_cards = sorted(self.table_cards, key=lambda card: card.card_id)
 
         # 抽牌配对
         if self.draw_pile:
@@ -298,6 +301,8 @@ class HanafudaRules:
                 self.evaluate_yaku(player)
             else:
                 self.table_cards.append(drawn_card)
+                # 对场牌按card_id排序
+                self.table_cards = sorted(self.table_cards, key=lambda card: card.card_id)
 
         self.current_player = 1 - self.current_player
 
@@ -312,57 +317,62 @@ class HanafudaRules:
         self.yaku_list[player] = []
 
         # 统计各类牌的数量
-        hikari = [card for card in collected_cards if card.category == "光"]
-        tane = [card for card in collected_cards if card.category == "种"]
+        hikari_with_rain = [card for card in collected_cards if card.card_name == "柳间小野道风"]
+        hikari_without_rain = [card for card in collected_cards if card.category == "光" and card.card_name != "柳间小野道风"]
+        flower = [card for card in collected_cards if card.card_name == "樱上幕"]
+        wine = [card for card in collected_cards if card.card_name == "菊上杯"]
+        moon = [card for card in collected_cards if card.card_name == "芒上月"]
+        animal = [card for card in collected_cards if card.card_name in ["萩间野猪", "枫间鹿", "牡丹上蝶"]]
+        red_tan = [card for card in collected_cards if card.card_name in ["松上赤短", "梅上赤短", "樱上赤短"]]
+        blue_tan = [card for card in collected_cards if card.card_name in ["牡丹青短", "菊上青短", "枫上青短"]]
         tan = [card for card in collected_cards if card.category == "短册"]
+        tane = [card for card in collected_cards if card.category == "种"]
         kasu = [card for card in collected_cards if card.category == "佳士"]
 
         # 五光
-        if len(hikari) == 5:
+        if len(hikari_with_rain) + len(hikari_without_rain) == 5:
             self.yaku_points[player] += 10
             self.yaku_list[player].append("五光")
 
         # 四光
-        elif len(hikari) == 4 and not any(card.card_name == "柳间小野道风" for card in hikari):
+        elif len(hikari_without_rain) == 4:
             self.yaku_points[player] += 8
             self.yaku_list[player].append("四光")
 
         # 雨四光
-        elif len(hikari) == 4 and any(card.card_name == "柳间小野道风" for card in hikari):
+        elif len(hikari_without_rain) == 3 and len(hikari_with_rain) == 1:
             self.yaku_points[player] += 7
             self.yaku_list[player].append("雨四光")
 
         # 三光
-        elif len(hikari) == 3 and not any(card.card_name == "柳间小野道风" for card in hikari):
+        elif len(hikari_without_rain) == 3:
             self.yaku_points[player] += 6
             self.yaku_list[player].append("三光")
 
+        # 花见酒（樱上幕 + 菊上杯）
+        if len(flower) + len(wine) == 2:
+            self.yaku_points[player] += 5
+            self.yaku_list[player].append("花见酒")
+
+        # 月见酒（芒上月 + 菊上杯）
+        if len(moon) + len(wine) == 2:
+            self.yaku_points[player] += 5
+            self.yaku_list[player].append("月见酒")
+
         # 猪鹿蝶
-        if any(card.card_name == "牡丹上蝶" for card in tane) and any(card.card_name == "萩间野猪" for card in tane) and any(card.card_name == "枫间鹿" for card in tane):
+        if len(animal) == 3:
             self.yaku_points[player] += 5
             self.yaku_list[player].append("猪鹿蝶")
 
         # 赤短
-        red_tan = [card for card in tan if card.card_name in ["松上赤短", "梅上赤短", "樱上赤短"]]
         if len(red_tan) == 3:
             self.yaku_points[player] += 5
             self.yaku_list[player].append("赤短")
 
         # 青短
-        blue_tan = [card for card in tan if card.card_name in ["牡丹青短", "菊上青短", "枫上青短"]]
         if len(blue_tan) == 3:
             self.yaku_points[player] += 5
             self.yaku_list[player].append("青短")
-
-        # 花见酒（樱上幕 + 菊上杯）
-        if any(card.card_name == "樱上幕" for card in collected_cards) and any(card.card_name == "菊上杯" for card in collected_cards):
-            self.yaku_points[player] += 5
-            self.yaku_list[player].append("花见酒")
-
-        # 月见酒（芒上月 + 菊上杯）
-        if any(card.card_name == "芒上月" for card in collected_cards) and any(card.card_name == "菊上杯" for card in collected_cards):
-            self.yaku_points[player] += 5
-            self.yaku_list[player].append("月见酒")
 
         # 短册（基础5张1分，每多1张加1分）
         if len(tan) >= 5:
