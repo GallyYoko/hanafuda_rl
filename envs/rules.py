@@ -1,13 +1,11 @@
-from typing import List, Dict, Tuple, Optional
 import random
-
 
 class Card:
     """
     花札牌类，表示一张花札牌。
     """
 
-    def __init__(self, card_id: int, month: int, category: str, points: int, card_name: str):
+    def __init__(self, card_id, month, category, points, card_name):
         self.card_id = card_id  # 牌的全局唯一ID（0-47）
         self.month = month      # 月份（1-12，对应1-12月）
         self.category = category  # 牌的类型："光"、"种"、"短册"、"佳士"
@@ -26,7 +24,7 @@ class Deck:
     def __init__(self):
         self.cards = self._initialize_deck()
 
-    def _initialize_deck(self) -> List[Card]:
+    def _initialize_deck(self):
         """
         初始化花札牌组，共48张牌。
         """
@@ -152,7 +150,7 @@ class Deck:
 
         return cards
 
-    def deal(self, seed: Optional[int] = None) -> Tuple[List[Card], List[Card], List[Card]]:
+    def deal(self, seed = None):
         """
         发牌逻辑：
         - 返回玩家手牌（2×8张）、场牌（8张）、剩余牌堆。
@@ -192,7 +190,7 @@ class HanafudaRules:
         self.yaku_list = {0: [], 1: []}  # 玩家0和玩家1的役种列表
         self.current_player = 0  # 当前玩家（0或1）
 
-    def reset(self, seed: Optional[int] = None):
+    def reset(self, seed = None):
         """
         重置游戏状态，返回初始发牌结果。
         同时检查手牌是否符合"手四"或"食付"条件。
@@ -230,7 +228,7 @@ class HanafudaRules:
         
         return None
 
-    def play_card(self, player: int, card_id: int, table_choice: int, drawn_choice: int):
+    def play_card(self, player, card_id, table_choice, drawn_choice):
         """
         处理玩家出牌逻辑：
         - 玩家从手牌中选择一张牌，尝试与场牌配对。
@@ -308,7 +306,7 @@ class HanafudaRules:
 
         return None
 
-    def evaluate_yaku(self, player: int):
+    def evaluate_yaku(self, player):
         """
         役判定模块：根据玩家收集的牌更新役点数和牌型。
         """
