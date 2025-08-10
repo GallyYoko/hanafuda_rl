@@ -1,109 +1,111 @@
 import gymnasium as gym
 import numpy as np
-from hanafuda_rl.envs.rules import HanafudaRules
+from .rules import HanafudaRules
+
 
 class HanafudaEnv(gym.Env):
-    """花札Gymnasium环境"""
-    metadata = {'render_modes': ['human', 'ansi'], 'render_fps': 4}
+    """
+    花札游戏环境，基于 Gymnasium 接口实现。
+    """
 
-    def __init__(self, render_mode=None):
+    metadata = {"render_modes": ["human", "ansi"], "render_fps": 4}
+
+    def __init__(self, render_mode = None):
         super().__init__()
-        self.rules = HanafudaRules()
         self.render_mode = render_mode
+        self.rules = HanafudaRules()
 
-        # 观察空间定义
-        self.observation_space = gym.spaces.Dict({
-            # 48张牌的各状态（手牌/收集牌/场牌/已见牌）
-            'own_hand': gym.spaces.MultiBinary(48),
-            'own_collected': gym.spaces.MultiBinary(48),
-            'opp_collected': gym.spaces.MultiBinary(48),
-            'table': gym.spaces.MultiBinary(48),
-            # 其他标量信息
-            'deck_remaining': gym.spaces.Box(0, 32, dtype=np.int32),
-            'current_score_self': gym.spaces.Box(-100, 100, dtype=np.int32),
-            'current_score_opp': gym.spaces.Box(-100, 100, dtype=np.int32),
-            'koikoi_flag_self': gym.spaces.Discrete(2),
-            'koikoi_flag_opp': gym.spaces.Discrete(2),
-        })
+        # 定义观测量
+        self._hand = np.zeros(48, dtype=np.int8)  # 我方手牌
+        self._table = np.zeros(48, dtype=np.int8)  # 场牌
+        self._my_collected = np.zeros(48, dtype=np.int8)  # 我方收集牌
+        self._opp_collected = np.zeros(48, dtype=np.int8)  # 对手收集牌
+        self._drawn_card = 48  # 抽中的牌
+        self._current_scores = np.zeros(2, dtype=np.float32)  # 当前役分
+        self._turn_phase = 0  # 游戏阶段
 
-        # 动作空间定义（最大动作数=手牌数*场牌选择）
-        self.action_space = gym.spaces.Discrete(8*8 + 2)  # +2用于结束回合/叫牌
+        # 定义状态集（observations）
+        self.observation_space = gym.spaces.Dict(
+            {
+                # 牌面信息（multi-hot）
+                "hand": gym.spaces.MultiBinary(48),  # 我方手牌
+                "table": gym.spaces.MultiBinary(48),  # 场牌
+                "my_collected": gym.spaces.MultiBinary(48),  # 我方收集牌
+                "opp_collected": gym.spaces.MultiBinary(48),  # 对手收集牌
+                "drawn_card": gym.spaces.Discrete(49),  # 抽中的牌
 
-    def reset(self, seed=None, options=None):
-        """重置游戏状态"""
+                # 局面数值特征
+                "deck_remaining": gym.spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),  # 山牌剩余数
+                "current_scores": gym.spaces.Box(low=0, high=1, shape=(2,), dtype=np.float32),  # 当前役分（归一化）
+                "koikoi_flags": gym.spaces.MultiBinary(2),  # 是否叫牌（双方）
+
+                # 役进度特征
+                "yaku_progress": gym.spaces.Box(low=0, high=1, shape=(22,), dtype=np.float32),
+
+                # 游戏阶段
+                "turn_phase": gym.spaces.Discrete(3),  # 游戏阶段阶段（出牌、抽牌、叫牌）
+            }
+        )
+
+        # 定义动作集
+        self.action_space = gym.spaces.Discrete(8*4+4+2)  # 手牌选择 * 场牌配对 + 抽牌配对 + 叫牌
+    
+    def _get_obs(self):
+        """
+        输出当前状态。
+        """
+        return {
+            "hand": self._hand, 
+            "table": self._table,
+            "my_collected": self._my_collected,
+            "opp_collected": self._opp_collected,
+            "drawn_card": self._drawn_card,
+            "turn_phase": self._turn_phase,
+        }
+    
+    def _get_info(self):
+        """
+        输出得分信息。
+        """
+        return {"current_scores": self._current_scores}
+
+    def reset(self, seed = None):
+        """
+        重置游戏状态，返回初始 observation 和 info。
+        """
         super().reset(seed=seed)
-        self.rules.reset()
-        self.current_player = 0
-        return self._get_obs(), self._get_info()
+        self.rules.reset(seed)
+
+        observation = self._get_obs()
+        info = self._get_info()
+
+        return observation, info
 
     def step(self, action):
-        """执行动作"""
-        # 解析动作
-        if action < 8*8:  # 普通出牌动作
-            card_idx = action // 8
-            table_choice = action % 8
-            self.rules.play_card(
-                player=self.current_player,
-                card_id=self.rules.player_hands[self.current_player][card_idx].card_id,
-                table_choice=table_choice,
-                drawn_choice=0
-            )
-        else:  # 特殊动作（结束/叫牌）
-            pass  # 待实现
-
-        # 切换玩家
-        self.current_player = 1 - self.current_player
-
-        # 检查游戏结束条件
-        terminated = self._check_termination()
-        reward = self._calculate_reward()
-        
-        return self._get_obs(), reward, terminated, False, self._get_info()
+        """
+        执行动作，返回新的状态、奖励、是否终止、是否截断和额外信息。
+        """
+        # TODO: 实现动作逻辑
+        observation = self._get_obs()
+        reward = 0.0
+        terminated = False
+        truncated = False
+        info = self._get_info()
+        return observation, reward, terminated, truncated, info
 
     def render(self):
-        """渲染当前状态"""
-        if self.render_mode == 'human':
-            print(f"当前玩家: {self.current_player}")
-            print(f"得分: 玩家0={self.rules.yaku_points[0]}, 玩家1={self.rules.yaku_points[1]}")
-        elif self.render_mode == 'ansi':
-            return str(self.rules)
+        """
+        渲染当前游戏状态。
+        """
+        if self.render_mode == "human":
+            # TODO: 实现可视化
+            pass
+        elif self.render_mode == "ansi":
+            # TODO: 实现 ASCII 渲染
+            pass
 
-    def _get_obs(self):
-        """获取当前观察"""
-        obs = {
-            'own_hand': np.zeros(48, dtype=np.int8),
-            'own_collected': np.zeros(48, dtype=np.int8),
-            'opp_collected': np.zeros(48, dtype=np.int8),
-            'table': np.zeros(48, dtype=np.int8),
-            'deck_remaining': len(self.rules.draw_pile),
-            'current_score_self': self.rules.yaku_points[self.current_player],
-            'current_score_opp': self.rules.yaku_points[1 - self.current_player],
-            'koikoi_flag_self': 0,  # 待实现
-            'koikoi_flag_opp': 0,   # 待实现
-        }
-        # 填充牌状态（简化示例）
-        for card in self.rules.player_hands[self.current_player]:
-            obs['own_hand'][card.card_id] = 1
-        # 其他牌状态填充...
-        return obs
-
-    def _get_info(self):
-        """获取调试信息"""
-        return {
-            'valid_actions': self._get_valid_actions(),
-            'yaku_formed': self.rules.check_yaku(self.current_player),
-        }
-
-    def _get_valid_actions(self):
-        """生成合法动作掩码"""
-        mask = np.zeros(self.action_space.n, dtype=np.int8)
-        # 待实现具体逻辑
-        return mask
-
-    def _check_termination(self):
-        """检查游戏结束条件"""
-        return False  # 待实现
-
-    def _calculate_reward(self):
-        """计算即时奖励"""
-        return 0  # 待实现
+    def close(self):
+        """
+        清理环境资源。
+        """
+        pass

@@ -185,6 +185,7 @@ class HanafudaRules:
         self.player_hands = None
         self.table_cards = None
         self.draw_pile = None
+        self.drawn_card = None
         self.collected_cards = {0: [], 1: []}  # 玩家0和玩家1的收集牌
         self.yaku_points = {0: 0, 1: 0}  # 玩家0和玩家1的役种分数
         self.yaku_list = {0: [], 1: []}  # 玩家0和玩家1的役种列表
@@ -228,12 +229,10 @@ class HanafudaRules:
         
         return None
 
-    def play_card(self, player, card_id, table_choice, drawn_choice):
+    def play_card(self, player, card_id, play_choice):
         """
         处理玩家出牌逻辑：
         - 玩家从手牌中选择一张牌，尝试与场牌配对。
-        - 无论配对成功与否，都会从山牌中抽一张牌进行配对。
-        - 如果抽出的牌与场上的多张牌匹配，使用drawn_choice参数选择配对的牌。
         - 返回更新后的游戏状态和动作结果。
         """
         if player != self.current_player:
@@ -259,11 +258,11 @@ class HanafudaRules:
         ]
 
         if matched_cards:
-            if table_choice >= len(matched_cards):
-                raise ValueError("Invalid table choice for matched cards.")
+            if play_choice >= len(matched_cards):
+                raise ValueError("Invalid play choice for matched cards.")
 
             # 将配对的牌加入收集区
-            collected_card = matched_cards[table_choice]
+            collected_card = matched_cards[play_choice]
             self.collected_cards[player].extend([card_to_play, collected_card])
 
             # 从场牌中移除配对的牌
@@ -273,34 +272,45 @@ class HanafudaRules:
             self.evaluate_yaku(player)
 
         else:
+            if play_choice != 3:
+                raise ValueError("Invalid play choice for unmatched cards.")
+            
             # 没有配对，将牌加入场牌
             self.table_cards.append(card_to_play)
             # 对场牌按card_id排序
             self.table_cards = sorted(self.table_cards, key=lambda card: card.card_id)
 
-        # 抽牌配对
-        if self.draw_pile:
-            drawn_card = self.draw_pile.pop(0)
-            drawn_matched_cards = [
-                card for card in self.table_cards
-                if card.month == drawn_card.month
-            ]
+        return None
 
-            if drawn_matched_cards:
-                # 如果有多张匹配的牌，使用drawn_choice选择配对的牌
-                if drawn_choice >= len(drawn_matched_cards):
-                    raise ValueError("Must provide drawn_choice when multiple cards match.")
-                
-                # 选择配对的牌
-                chosen_card = drawn_matched_cards[drawn_choice]
-                self.collected_cards[player].extend([drawn_card, chosen_card])
-                self.table_cards.remove(chosen_card)
-                # 检查是否形成役
-                self.evaluate_yaku(player)
-            else:
-                self.table_cards.append(drawn_card)
-                # 对场牌按card_id排序
-                self.table_cards = sorted(self.table_cards, key=lambda card: card.card_id)
+    def judge_draw_card(self, player, draw_choice):
+        """
+        处理抽牌逻辑：
+        - 从山牌中抽一张牌，尝试与场牌配对。
+        - 返回更新后的游戏状态和动作结果。
+        """
+
+        matched_cards = [
+            card for card in self.table_cards
+            if card.month == self.drawn_card.month
+        ]
+
+        if matched_cards:
+            # 如果有多张匹配的牌
+            if draw_choice >= len(matched_cards):
+                raise ValueError("Invalid draw choice for matched cards.")
+            
+            chosen_card = matched_cards[draw_choice]
+            self.collected_cards[player].extend([self.drawn_card, chosen_card])
+            self.table_cards.remove(chosen_card)
+            # 检查是否形成役
+            self.evaluate_yaku(player)
+        else:
+            if draw_choice != 3:
+                raise ValueError("Invalid draw choice for unmatched cards.")
+            
+            self.table_cards.append(self.drawn_card)
+            # 对场牌按card_id排序
+            self.table_cards = sorted(self.table_cards, key=lambda card: card.card_id)
 
         self.current_player = 1 - self.current_player
 
