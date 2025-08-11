@@ -97,6 +97,8 @@ class HanafudaEnv(gym.Env):
         self.rules.reset(np_random=self.np_random)
 
         # 从规则引擎获取初始手牌和场牌
+        self._hand = np.zeros(48, dtype=np.int8)
+        self._table = np.zeros(48, dtype=np.int8)
         hand = self.rules.player_hands[0],
         table = self.rules.table_cards
 
