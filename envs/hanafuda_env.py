@@ -10,7 +10,7 @@ class HanafudaEnv(gym.Env):
 
     metadata = {"render_modes": ["human", "ansi"], "render_fps": 4}
 
-    def __init__(self, render_mode = "ansi"):
+    def __init__(self, render_mode = None):
         super().__init__()
         self.render_mode = render_mode
         self.rules = HanafudaRules()
@@ -432,27 +432,20 @@ class HanafudaEnv(gym.Env):
     def render(self):
         """
         以 ANSI 文本格式渲染当前游戏状态。
-        卡牌格式为 [月份-类型-牌名]。
+        使用紧凑的单行卡牌表示法 [月份-类别]。
         """
         if self.render_mode == "ansi":
-            # --- 辅助函数，用于打印一组牌 ---
-            def print_cards(cards, max_per_line=4): # 减少每行卡牌数以适应更长的字符串
+            # --- 辅助函数，使用新的紧凑格式打印单行 ---
+            def print_cards_compact(cards):
                 if not cards:
                     print("(空)")
                     return
                 
-                # 为了对齐，我们可以计算最长的卡牌字符串长度
-                max_len = 0
-                if cards:
-                    max_len = max(len(self._card_to_str(c)) for c in cards)
+                # 使用新的紧凑格式
+                card_strings = [self._card_to_compact_str(c) for c in cards]
+                print(" ".join(card_strings))
 
-                card_strings = [self._card_to_str(c).ljust(max_len) for c in cards]
-
-                for i in range(0, len(card_strings), max_per_line):
-                    line = card_strings[i:i+max_per_line]
-                    print("  ".join(line))
-
-            # 清空屏幕（在Linux/macOS上效果好）
+            # 清空屏幕
             print("\033c", end="")
             print("="*90)
             
@@ -460,19 +453,19 @@ class HanafudaEnv(gym.Env):
             print("--- 对手 (Player 1) ---")
             print(f"手牌数: {len(self.rules.player_hands[1])}")
             print("收集的牌:")
-            print_cards(self.rules.collected_cards[1])
+            print_cards_compact(self.rules.collected_cards[1])
             
             print("\n" + "-"*42 + " 场面 " + "-"*41)
             
             # --- 场牌 ---
-            print_cards(self.rules.table_cards)
+            print_cards_compact(self.rules.table_cards)
 
             # --- 我方信息 ---
             print("\n--- 我方 (Agent, Player 0) ---")
             print("手牌:")
-            print_cards(self.rules.player_hands[0])
+            print_cards_compact(self.rules.player_hands[0])
             print("收集的牌:")
-            print_cards(self.rules.collected_cards[0])
+            print_cards_compact(self.rules.collected_cards[0])
 
             print("\n" + "="*90)
 
@@ -488,9 +481,9 @@ class HanafudaEnv(gym.Env):
             deck_str = f"山牌剩余: {len(self.rules.draw_pile)}"
             phase_str = f"当前阶段: {phase_map.get(self._turn_phase, '未知')}"
             
-            # 如果是抽牌阶段，显示抽出的牌
             if self._turn_phase == 1 and self.rules.drawn_card:
-                drawn_card_str = f" -> 抽到: {self._card_to_str(self.rules.drawn_card)}"
+                # 叫牌决策时，也显示一下是什么牌触发的
+                drawn_card_str = f" -> 抽到: {self._card_to_compact_str(self.rules.drawn_card)}"
                 phase_str += drawn_card_str
 
             print(f"{my_score_str:<30} {opp_score_str:<30} {deck_str:<25}")
@@ -500,16 +493,23 @@ class HanafudaEnv(gym.Env):
         elif self.render_mode == "human":
             print("Human render mode is not implemented yet. Use 'ansi'.")
             pass
-
-    def _card_to_str(self, card):
-        """将 Card 对象转换为一个详细的字符串表示。"""
+    
+    def _card_to_compact_str(self, card):
+        """将 Card 对象转换为一个紧凑的字符串表示，例如 [01-光]"""
         if card is None:
             return ""
-        # 新格式: [月份-类型-牌名]
+        
         month_str = str(card.month).zfill(2)
-        category_str = card.category
-        name_str = card.card_name
-        return f"[{month_str}-{category_str}-{name_str}]"
+        # 使用类别首字母来缩写
+        category_map = {
+            "光": "光",
+            "种": "种",
+            "短册": "短",
+            "佳士": "佳"
+        }
+        cat_str = category_map.get(card.category, "?")
+        
+        return f"[{month_str}-{cat_str}]"
 
     def close(self):
         """

@@ -168,7 +168,7 @@ def test_random_rollout_stability(env):
     通过运行大量随机对局来对环境进行压力测试。
     目的是捕捉那些在特定代码路径下才会出现的边缘案例、崩溃或死锁。
     """
-    num_episodes = 1000  # 可以增加到1000进行更彻底的本地测试
+    num_episodes = 10000  # 可以增加到1000进行更彻底的本地测试
 
     for i in range(num_episodes):
         obs, info = env.reset(seed=i) # 使用不同的种子进行多样化测试
