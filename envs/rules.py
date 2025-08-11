@@ -1,4 +1,4 @@
-import random
+import numpy as np
 
 class Card:
     """
@@ -150,17 +150,17 @@ class Deck:
 
         return cards
 
-    def deal(self, seed = None):
+    def deal(self, np_random = None):
         """
         发牌逻辑：
         - 返回玩家手牌（2×8张）、场牌（8张）、剩余牌堆。
         - 支持随机或确定性发牌（通过seed参数）。
         - 手牌和场牌按card_id排序。
         """
-        if seed is not None:
-            random.seed(seed)
-
-        shuffled_cards = random.sample(self.cards, len(self.cards))
+        if np_random is None:
+            np_random = np.random.default_rng()
+        shuffled_cards = np_random.permutation(self.cards)
+        shuffled_cards = list(shuffled_cards)
 
         # 玩家手牌（每人8张）
         player1_hand = sorted(shuffled_cards[:8], key=lambda card: card.card_id)
@@ -193,12 +193,12 @@ class HanafudaRules:
         self.turn_phase = 0  # 当前阶段（0：出牌阶段，1：抽牌阶段，2：叫牌阶段）
         self.game_over = False  # 游戏是否结束
 
-    def reset(self, seed = None):
+    def reset(self, np_random = None):
         """
         重置游戏状态，返回初始发牌结果。
         同时检查手牌是否符合"手四"或"食付"条件。
         """
-        self.player_hands, self.table_cards, self.draw_pile = self.deck.deal(seed)
+        self.player_hands, self.table_cards, self.draw_pile = self.deck.deal(np_random)
         self.collected_cards = {0: [], 1: []}
         self.yaku_points = {0: 0, 1: 0}
         self.yaku_list = {0: [], 1: []}

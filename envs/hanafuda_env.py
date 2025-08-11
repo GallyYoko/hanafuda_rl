@@ -21,7 +21,7 @@ class HanafudaEnv(gym.Env):
         self._my_collected = np.zeros(48, dtype=np.int8)  # 我方收集牌
         self._opp_collected = np.zeros(48, dtype=np.int8)  # 对手收集牌
         self._drawn_card = 48  # 抽中的牌
-        self._deck_remaining = 48  # 山牌剩余数
+        self._deck_remaining = np.array([1.], dtype=np.float32)  # 山牌剩余数
         self._current_scores = np.zeros(2, dtype=np.float32)  # 当前役分
         self._koikoi_flags = np.zeros(2, dtype=np.int8)  # 是否叫牌（双方）
         self._yaku_progress = np.zeros(22, dtype=np.float32)  # 役进度表
@@ -49,6 +49,19 @@ class HanafudaEnv(gym.Env):
                 "turn_phase": gym.spaces.Discrete(3),  # 游戏阶段阶段（出牌、抽牌、叫牌）
             }
         )
+
+        # 定义动作
+        self._action = {}
+        # 出牌动作
+        for play_card in range(8):
+            for match_card in range(4):
+                self._action[play_card*4 + match_card] = [play_card, match_card]
+        # 抽牌动作
+        for draw_match_card in range(4):
+            self._action[32 + draw_match_card] = [draw_match_card]
+        # 叫牌动作
+        for koikoi in range(2):
+            self._action[36 + koikoi] = [koikoi]
 
         # 定义动作集
         self.action_space = gym.spaces.Discrete(8*4+4+2)  # 手牌选择 * 场牌配对 + 抽牌配对 + 叫牌
@@ -81,7 +94,31 @@ class HanafudaEnv(gym.Env):
         重置游戏状态，返回初始 observation 和 info。
         """
         super().reset(seed=seed)
-        self.rules.reset(seed)
+        self.rules.reset(np_random=self.np_random)
+
+        # 从规则引擎获取初始手牌和场牌
+        hand = self.rules.player_hands[0],
+        table = self.rules.table_cards
+
+        # 更新手牌状态
+        for card in hand:
+            self._hand[card.card_id] = 1
+
+        # 更新场牌状态
+        for card in table:
+            self._table[card.card_id] = 1
+
+        # 更新收集区信息
+        self._my_collected = np.zeros(48, dtype=np.int8)
+        self._opp_collected = np.zeros(48, dtype=np.int8)
+
+        # 更新其他信息
+        self._drawn_card = 48
+        self._deck_remaining = np.array([1.], dtype=np.float32)
+        self._current_scores = np.zeros(2, dtype=np.float32)
+        self._koikoi_flags = np.zeros(2, dtype=np.int8)
+        self._yaku_progress = np.zeros(22, dtype=np.float32)
+        self._turn_phase = 0
 
         observation = self._get_obs()
         info = self._get_info()
