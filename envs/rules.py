@@ -190,6 +190,8 @@ class HanafudaRules:
         self.yaku_points = {0: 0, 1: 0}  # 玩家0和玩家1的役种分数
         self.yaku_list = {0: [], 1: []}  # 玩家0和玩家1的役种列表
         self.current_player = 0  # 当前玩家（0或1）
+        self.turn_phase = 0  # 当前阶段（0：出牌阶段，1：抽牌阶段，2：叫牌阶段）
+        self.game_over = False  # 游戏是否结束
 
     def reset(self, seed = None):
         """
@@ -202,8 +204,6 @@ class HanafudaRules:
         self.yaku_list = {0: [], 1: []}
         self.current_player = 0
         
-        force_end = False
-        
         # 检查手四和食付
         for player in range(2):
             # 手四：4张同月份
@@ -215,28 +215,29 @@ class HanafudaRules:
                 if count >= 4:
                     self.yaku_points[player] = 6
                     self.yaku_list[player].append("手四")
-                    force_end = True
+                    self.game_over = True
                     break
             
             # 食付：4对2张同月份
-            if not force_end:
+            if not self.game_over:
                 pairs = sum(1 for count in month_counts.values() if count >= 2)
                 if pairs >= 4:
                     self.yaku_points[player] = 6
                     self.yaku_list[player].append("食付")
-                    force_end = True
+                    self.game_over = True
                     break
         
         return None
 
-    def play_card(self, player, card_id, play_choice):
+    def play_card(self, card_id, play_choice):
         """
         处理玩家出牌逻辑：
         - 玩家从手牌中选择一张牌，尝试与场牌配对。
         - 返回更新后的游戏状态和动作结果。
         """
-        if player != self.current_player:
-            raise ValueError("Not the current player's turn.")
+        self.turn_phase = 0
+
+        player = self.current_player
 
         # 找到玩家手牌中的目标牌
         card_to_play = None
@@ -269,7 +270,7 @@ class HanafudaRules:
             self.table_cards.remove(collected_card)
 
             # 检查是否形成役
-            self.evaluate_yaku(player)
+            self.evaluate_yaku()
 
         else:
             if play_choice != 3:
@@ -282,12 +283,22 @@ class HanafudaRules:
 
         return None
 
-    def judge_draw_card(self, player, draw_choice):
+    def draw_card(self): 
+        """
+        抽牌
+        """
+        self.turn_phase = 1
+        
+        self.drawn_card = self.draw_pile.pop()
+        return None
+
+    def judge_draw_card(self, draw_choice):
         """
         处理抽牌逻辑：
-        - 从山牌中抽一张牌，尝试与场牌配对。
+        - 尝试与场牌配对。
         - 返回更新后的游戏状态和动作结果。
         """
+        player = self.current_player
 
         matched_cards = [
             card for card in self.table_cards
@@ -302,8 +313,9 @@ class HanafudaRules:
             chosen_card = matched_cards[draw_choice]
             self.collected_cards[player].extend([self.drawn_card, chosen_card])
             self.table_cards.remove(chosen_card)
+
             # 检查是否形成役
-            self.evaluate_yaku(player)
+            self.evaluate_yaku()
         else:
             if draw_choice != 3:
                 raise ValueError("Invalid draw choice for unmatched cards.")
@@ -312,17 +324,17 @@ class HanafudaRules:
             # 对场牌按card_id排序
             self.table_cards = sorted(self.table_cards, key=lambda card: card.card_id)
 
-        self.current_player = 1 - self.current_player
-
         return None
 
-    def evaluate_yaku(self, player):
+    def evaluate_yaku(self):
         """
         役判定模块：根据玩家收集的牌更新役点数和牌型。
         """
+        player = self.current_player
+
         collected_cards = self.collected_cards[player]
-        self.yaku_points[player] = 0
-        self.yaku_list[player] = []
+        yaku_points = 0
+        self.yaku_list[player] = []  # 清空当前牌型
 
         # 统计各类牌的数量
         hikari_with_rain = [card for card in collected_cards if card.card_name == "柳间小野道风"]
@@ -339,62 +351,83 @@ class HanafudaRules:
 
         # 五光
         if len(hikari_with_rain) + len(hikari_without_rain) == 5:
-            self.yaku_points[player] += 10
+            yaku_points += 10
             self.yaku_list[player].append("五光")
 
         # 四光
         elif len(hikari_without_rain) == 4:
-            self.yaku_points[player] += 8
+            yaku_points += 8
             self.yaku_list[player].append("四光")
 
         # 雨四光
         elif len(hikari_without_rain) == 3 and len(hikari_with_rain) == 1:
-            self.yaku_points[player] += 7
+            yaku_points += 7
             self.yaku_list[player].append("雨四光")
 
         # 三光
         elif len(hikari_without_rain) == 3:
-            self.yaku_points[player] += 6
+            yaku_points += 6
             self.yaku_list[player].append("三光")
 
         # 花见酒（樱上幕 + 菊上杯）
         if len(flower) + len(wine) == 2:
-            self.yaku_points[player] += 5
+            yaku_points += 5
             self.yaku_list[player].append("花见酒")
 
         # 月见酒（芒上月 + 菊上杯）
         if len(moon) + len(wine) == 2:
-            self.yaku_points[player] += 5
+            yaku_points += 5
             self.yaku_list[player].append("月见酒")
 
         # 猪鹿蝶
         if len(animal) == 3:
-            self.yaku_points[player] += 5
+            yaku_points += 5
             self.yaku_list[player].append("猪鹿蝶")
 
         # 赤短
         if len(red_tan) == 3:
-            self.yaku_points[player] += 5
+            yaku_points += 5
             self.yaku_list[player].append("赤短")
 
         # 青短
         if len(blue_tan) == 3:
-            self.yaku_points[player] += 5
+            yaku_points += 5
             self.yaku_list[player].append("青短")
 
         # 短册（基础5张1分，每多1张加1分）
         if len(tan) >= 5:
-            self.yaku_points[player] += 1 + (len(tan) - 5)
+            yaku_points += 1 + (len(tan) - 5)
             self.yaku_list[player].append(f"短册 x{1 + (len(tan) - 5)}")
 
         # 种（基础5张1分，每多1张加1分）
         if len(tane) >= 5:
-            self.yaku_points[player] += 1 + (len(tane) - 5)
+            yaku_points += 1 + (len(tane) - 5)
             self.yaku_list[player].append(f"种 x{1 + (len(tane) - 5)}")
 
         # 佳士（基础10张1分，每多1张加1分）
         if len(kasu) >= 10:
-            self.yaku_points[player] += 1 + (len(kasu) - 10)
+            yaku_points += 1 + (len(kasu) - 10)
             self.yaku_list[player].append(f"佳士 x{1 + (len(kasu) - 10)}")
 
+        if yaku_points > self.yaku_points[player]:
+            self.turn_phase = 2
+            self.yaku_points[player] = yaku_points
+
+        return None
+    
+    def judge_koikoi(self, koikoi):
+        """
+        判断是否叫牌
+        """
+        if not koikoi:
+            self.game_over = True
+
+        return None
+    
+    def switch_player(self):
+        """
+        切换玩家
+        """
+        self.current_player = 1 - self.current_player
+        
         return None

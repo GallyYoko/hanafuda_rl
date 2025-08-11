@@ -21,7 +21,10 @@ class HanafudaEnv(gym.Env):
         self._my_collected = np.zeros(48, dtype=np.int8)  # 我方收集牌
         self._opp_collected = np.zeros(48, dtype=np.int8)  # 对手收集牌
         self._drawn_card = 48  # 抽中的牌
+        self._deck_remaining = 48  # 山牌剩余数
         self._current_scores = np.zeros(2, dtype=np.float32)  # 当前役分
+        self._koikoi_flags = np.zeros(2, dtype=np.int8)  # 是否叫牌（双方）
+        self._yaku_progress = np.zeros(22, dtype=np.float32)  # 役进度表
         self._turn_phase = 0  # 游戏阶段
 
         # 定义状态集（observations）
@@ -60,6 +63,10 @@ class HanafudaEnv(gym.Env):
             "my_collected": self._my_collected,
             "opp_collected": self._opp_collected,
             "drawn_card": self._drawn_card,
+            "deck_remaining": self._deck_remaining,
+            "current_scores": self._current_scores,
+            "koikoi_flags": self._koikoi_flags,
+            "yaku_progress": self._yaku_progress,
             "turn_phase": self._turn_phase,
         }
     
