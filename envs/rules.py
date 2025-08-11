@@ -188,10 +188,13 @@ class HanafudaRules:
         self.drawn_card = None
         self.collected_cards = {0: [], 1: []}  # 玩家0和玩家1的收集牌
         self.yaku_points = {0: 0, 1: 0}  # 玩家0和玩家1的役种分数
+        self.koikoi_flags = {0: 0, 1: 0}  # 玩家0和玩家1是否叫牌
         self.yaku_list = {0: [], 1: []}  # 玩家0和玩家1的役种列表
+        self.yaku_progress = {0: np.zeros(11, dtype=np.float32), 1: np.zeros(11, dtype=np.float32)} # 玩家0和玩家1的役种进度
         self.current_player = 0  # 当前玩家（0或1）
         self.turn_phase = 0  # 当前阶段（0：出牌阶段，1：抽牌阶段，2：叫牌阶段）
         self.game_over = False  # 游戏是否结束
+        self.game_result = None # 游戏是否结束（None：未结束，'player0_win', 'player1_win', 'draw'）
 
     def reset(self, np_random = None):
         """
@@ -201,8 +204,13 @@ class HanafudaRules:
         self.player_hands, self.table_cards, self.draw_pile = self.deck.deal(np_random)
         self.collected_cards = {0: [], 1: []}
         self.yaku_points = {0: 0, 1: 0}
+        self.koikoi_flags = {0: 0, 1: 0}
         self.yaku_list = {0: [], 1: []}
+        self.yaku_progress = {0: np.zeros(11, dtype=np.float32), 1: np.zeros(11, dtype=np.float32)}
         self.current_player = 0
+        self.turn_phase = 0
+        self.game_over = False
+        self.game_result = None
         
         # 检查手四和食付
         for player in range(2):
@@ -216,6 +224,7 @@ class HanafudaRules:
                     self.yaku_points[player] = 6
                     self.yaku_list[player].append("手四")
                     self.game_over = True
+                    self.game_result = f'player{player}_win'
                     break
             
             # 食付：4对2张同月份
@@ -225,6 +234,7 @@ class HanafudaRules:
                     self.yaku_points[player] = 6
                     self.yaku_list[player].append("食付")
                     self.game_over = True
+                    self.game_result = f'player{player}_win'
                     break
         
         return None
@@ -338,79 +348,100 @@ class HanafudaRules:
 
         # 统计各类牌的数量
         hikari_with_rain = [card for card in collected_cards if card.card_name == "柳间小野道风"]
+        self.yaku_progress[player][0] = len(hikari_with_rain) / 1
+
         hikari_without_rain = [card for card in collected_cards if card.category == "光" and card.card_name != "柳间小野道风"]
+        self.yaku_progress[player][1] = len(hikari_without_rain) / 4
+
         flower = [card for card in collected_cards if card.card_name == "樱上幕"]
+        self.yaku_progress[player][2] = len(flower) / 1
+
         wine = [card for card in collected_cards if card.card_name == "菊上杯"]
+        self.yaku_progress[player][3] = len(wine) / 1
+
         moon = [card for card in collected_cards if card.card_name == "芒上月"]
+        self.yaku_progress[player][4] = len(moon) / 1
+
         animal = [card for card in collected_cards if card.card_name in ["萩间野猪", "枫间鹿", "牡丹上蝶"]]
+        self.yaku_progress[player][5] = len(animal) / 3
+
         red_tan = [card for card in collected_cards if card.card_name in ["松上赤短", "梅上赤短", "樱上赤短"]]
+        self.yaku_progress[player][6] = len(red_tan) / 3
+
         blue_tan = [card for card in collected_cards if card.card_name in ["牡丹青短", "菊上青短", "枫上青短"]]
+        self.yaku_progress[player][7] = len(blue_tan) / 3
+
         tan = [card for card in collected_cards if card.category == "短册"]
+        self.yaku_progress[player][8] = len(tan) / 5
+
         tane = [card for card in collected_cards if card.category == "种"]
+        self.yaku_progress[player][9] = len(tane) / 5
+
         kasu = [card for card in collected_cards if card.category == "佳士"]
+        self.yaku_progress[player][10] = len(kasu) / 10
 
         # 五光
         if len(hikari_with_rain) + len(hikari_without_rain) == 5:
-            yaku_points += 10
+            yaku_points += 10.
             self.yaku_list[player].append("五光")
 
         # 四光
         elif len(hikari_without_rain) == 4:
-            yaku_points += 8
+            yaku_points += 8.
             self.yaku_list[player].append("四光")
 
         # 雨四光
         elif len(hikari_without_rain) == 3 and len(hikari_with_rain) == 1:
-            yaku_points += 7
+            yaku_points += 7.
             self.yaku_list[player].append("雨四光")
 
         # 三光
         elif len(hikari_without_rain) == 3:
-            yaku_points += 6
+            yaku_points += 6.
             self.yaku_list[player].append("三光")
 
         # 花见酒（樱上幕 + 菊上杯）
         if len(flower) + len(wine) == 2:
-            yaku_points += 5
+            yaku_points += 5.
             self.yaku_list[player].append("花见酒")
 
         # 月见酒（芒上月 + 菊上杯）
         if len(moon) + len(wine) == 2:
-            yaku_points += 5
+            yaku_points += 5.
             self.yaku_list[player].append("月见酒")
 
         # 猪鹿蝶
         if len(animal) == 3:
-            yaku_points += 5
+            yaku_points += 5.
             self.yaku_list[player].append("猪鹿蝶")
 
         # 赤短
         if len(red_tan) == 3:
-            yaku_points += 5
+            yaku_points += 5.
             self.yaku_list[player].append("赤短")
 
         # 青短
         if len(blue_tan) == 3:
-            yaku_points += 5
+            yaku_points += 5.
             self.yaku_list[player].append("青短")
 
         # 短册（基础5张1分，每多1张加1分）
         if len(tan) >= 5:
-            yaku_points += 1 + (len(tan) - 5)
+            yaku_points += 1. + (len(tan) - 5)
             self.yaku_list[player].append(f"短册 x{1 + (len(tan) - 5)}")
 
         # 种（基础5张1分，每多1张加1分）
         if len(tane) >= 5:
-            yaku_points += 1 + (len(tane) - 5)
+            yaku_points += 1. + (len(tane) - 5)
             self.yaku_list[player].append(f"种 x{1 + (len(tane) - 5)}")
 
         # 佳士（基础10张1分，每多1张加1分）
         if len(kasu) >= 10:
-            yaku_points += 1 + (len(kasu) - 10)
+            yaku_points += 1. + (len(kasu) - 10)
             self.yaku_list[player].append(f"佳士 x{1 + (len(kasu) - 10)}")
 
         if yaku_points > self.yaku_points[player]:
-            self.turn_phase = 2
+            self.turn_phase += 2
             self.yaku_points[player] = yaku_points
 
         return None
@@ -421,6 +452,9 @@ class HanafudaRules:
         """
         if not koikoi:
             self.game_over = True
+            self.game_result = f'player{self.current_player}_win'
+        else:
+            self.koikoi_flags[self.current_player] = 1
 
         return None
     
