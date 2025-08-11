@@ -446,8 +446,7 @@ class HanafudaEnv(gym.Env):
                 print(" ".join(card_strings))
 
             # 清空屏幕
-            print("\033c", end="")
-            print("="*90)
+            print("-"*90)
             
             # --- 对手信息 ---
             print("--- 对手 (Player 1) ---")
@@ -467,7 +466,7 @@ class HanafudaEnv(gym.Env):
             print("收集的牌:")
             print_cards_compact(self.rules.collected_cards[0])
 
-            print("\n" + "="*90)
+            print("\n" + "-"*90)
 
             # --- 游戏状态 ---
             phase_map = {
@@ -476,8 +475,23 @@ class HanafudaEnv(gym.Env):
                 2: "出牌后叫牌决策",
                 3: "抽牌后叫牌决策"
             }
+            # 获取役种列表
+            my_yakus = self.rules.yaku_list[0]
+            opp_yakus = self.rules.yaku_list[1]
+            
+            # 构建包含役种名称的得分字符串
             my_score_str = f"我方得分: {self.rules.yaku_points[0]}"
+            if my_yakus:
+                my_score_str += f"  (役: {', '.join(my_yakus)})" # 添加役种
+
             opp_score_str = f"对手得分: {self.rules.yaku_points[1]}"
+            if opp_yakus:
+                opp_score_str += f"  (役: {', '.join(opp_yakus)})" # 添加役种
+                
+            print(my_score_str)
+            print(opp_score_str)
+
+            # 打印其他信息
             deck_str = f"山牌剩余: {len(self.rules.draw_pile)}"
             phase_str = f"当前阶段: {phase_map.get(self._turn_phase, '未知')}"
             
