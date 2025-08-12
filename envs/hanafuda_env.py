@@ -94,7 +94,7 @@ class HanafudaEnv(gym.Env):
             "action_mask": self.get_action_mask()
         }
 
-    def reset(self, seed = None):
+    def reset(self, seed = None, options=None):
         """
         重置游戏状态，返回初始 observation 和 info。
         """
@@ -138,21 +138,16 @@ class HanafudaEnv(gym.Env):
         执行动作，返回新的状态、奖励、是否终止、是否截断和额外信息。
         """
         mask = self.get_action_mask()
+        terminated = False # 游戏继续
+
         if not mask[action]:
             # 如果出现非法动作，不报错，而是惩罚智能体并保持状态不变
             # 这使得环境能兼容 check_env 和不支持掩码的算法
             reward = -1.0  # 负奖励
             terminated = False # 或者 True，取决于你希望智能体如何学习
             truncated = False
-            
-            # 返回当前状态，让智能体知道它的动作没有产生效果
-            observation = self._get_obs()
-            info = self._get_info()
-            return observation, reward, terminated, truncated, info
-        
-        terminated = False # 游戏继续
 
-        if self._turn_phase == 0:  # 出牌阶段
+        elif self._turn_phase == 0:  # 出牌阶段
 
             if not self.rules.player_hands[0]:
                 terminated = True  # 游戏结束
@@ -168,16 +163,21 @@ class HanafudaEnv(gym.Env):
                 self.rules.play_card(card_to_play.card_id, match_choice)
                 # 游戏阶段更新
                 if self.rules.turn_phase == 2:
+                    # 奖励 = 当前分数 - 上一次分数
+                    reward = (self.rules.yaku_points[0] - self._current_scores[0]) * 0.1
+                    # 游戏阶段更新
                     self._turn_phase = 2  # 出牌后叫牌阶段
                 else:
+                    if len(self.rules.collected_cards[0]) > self._my_collected.sum():
+                        reward = 0.  # 匹配奖励
+                    else:
+                        reward = 0.  # 无匹配惩罚
+                    # 游戏阶段更新
                     self._turn_phase = 1  # 抽牌阶段
                     # 抽牌动作
                     self.rules.draw_card()
                     # 抽牌更新
                     self._drawn_card = self.rules.drawn_card.card_id
-
-                # 计算奖励
-                reward = 0.
         
         elif self._turn_phase == 1:  # 抽牌阶段
             # 解析动作
@@ -186,15 +186,17 @@ class HanafudaEnv(gym.Env):
             self.rules.judge_draw_card(draw_choice)
             # 游戏阶段更新
             if self.rules.turn_phase == 3:
+                # 奖励 = 当前分数 - 上一次分数
+                reward = (self.rules.yaku_points[0] - self._current_scores[0]) * 0.1
+                # 游戏阶段更新
                 self._turn_phase = 3  # 抽牌后叫牌阶段
             else:
+                reward = 0. # 无奖励
+                # 游戏阶段更新
                 self.rules.switch_player() # 切换玩家
                 self._opp_turn() # 对手回合
                 self.rules.switch_player() # 切换玩家
                 self._turn_phase = 0  # 出牌阶段
-            
-            # 计算奖励
-            reward = 0.
         
         elif self._turn_phase == 2:  # 出牌后叫牌阶段
             # 解析动作
@@ -203,22 +205,19 @@ class HanafudaEnv(gym.Env):
             self._koikoi_flags[0] = koikoi
             if koikoi == 1:  # 选择继续
                 self.rules.judge_koikoi(True)
+                reward = 0.5  # 鼓励叫牌探索
                 # 游戏阶段更新
                 self._turn_phase = 1  # 抽牌阶段
                 # 抽牌动作
                 self.rules.draw_card()
                 # 抽牌更新
                 self._drawn_card = self.rules.drawn_card.card_id
-                
-                # 计算奖励
-                reward = 0.
             else:  # 选择不继续
                 self.rules.judge_koikoi(False)
                 # 游戏结束
                 terminated = True
-
                 # 奖励为当前役分
-                reward = self._current_scores[0]
+                reward = self.rules.yaku_points[0]
         
         else:  # 抽牌后叫牌阶段
             # 解析动作
@@ -227,19 +226,16 @@ class HanafudaEnv(gym.Env):
             self._koikoi_flags[0] = koikoi
             if koikoi == 1:  # 选择继续
                 self.rules.judge_koikoi(True)
+                reward = 0.5  # 鼓励叫牌探索
                 # 游戏阶段更新
                 self.rules.switch_player() # 切换玩家
                 self._opp_turn()  # 对手回合
                 self.rules.switch_player() # 切换玩家
                 self._turn_phase = 0  # 出牌阶段
-
-                # 计算奖励
-                reward = 0.
             else:  # 选择不继续
                 self.rules.judge_koikoi(False)
                 # 游戏结束
                 terminated = True
-
                 # 奖励为当前役分
                 reward = self.rules.yaku_points[0]
 
@@ -248,7 +244,7 @@ class HanafudaEnv(gym.Env):
             terminated = True
             # 如果对手赢了
             if self.rules.game_result == 'player1_win':
-            # 惩罚为对手分数
+                # 惩罚为对手分数
                 reward = -self.rules.yaku_points[1]
             # 如果是平局
             else:
