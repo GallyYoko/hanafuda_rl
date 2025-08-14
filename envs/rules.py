@@ -194,7 +194,7 @@ class HanafudaRules:
         self.current_player = 0  # 当前玩家（0或1）
         self.turn_phase = 0  # 当前阶段（0：出牌阶段，1：抽牌阶段，2：出牌后叫牌阶段，3：抽牌后叫牌阶段）
         self.game_over = False  # 游戏是否结束
-        self.game_result = None # 游戏是否结束（None：未结束，'player0_win', 'player1_win', 'draw'）
+        self.game_result = None # 游戏是否结束（None：未结束，-1：平局，0：玩家0获胜，1：玩家1获胜）
 
     def reset(self, np_random = None):
         """
@@ -225,7 +225,7 @@ class HanafudaRules:
                     self.yaku_points[player] = 6
                     self.yaku_list[player].append("手四")
                     self.game_over = True
-                    self.game_result = f'player{player}_win'
+                    self.game_result = player
                     break
             
             # 食付：4对2张同月份
@@ -235,7 +235,7 @@ class HanafudaRules:
                     self.yaku_points[player] = 6
                     self.yaku_list[player].append("食付")
                     self.game_over = True
-                    self.game_result = f'player{player}_win'
+                    self.game_result = player
                     break
         
         return None
@@ -483,13 +483,8 @@ class HanafudaRules:
         """
         判断游戏结束
         """
-        if winner_id == -1:
-            self.game_over = True
-            self.game_result = "draw"
-
-        elif winner_id in [0, 1]:
-            self.game_over = True
-            self.game_result = f'player{winner_id}_win'
+        self.game_over = True
+        self.game_result = winner_id
 
         return None
 

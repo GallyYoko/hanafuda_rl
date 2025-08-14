@@ -133,13 +133,18 @@ class HanafudaEnv(gym.Env):
             "turn_phase": self._turn_phase,
         }
     
-    def _get_info(self):
+    def _get_info(self, reward):
         """
         输出动作掩码和当前玩家信息。
         """
+        if not self.rules.game_over:
+            reward_dict = {self.current_player: reward, 1 - self.current_player: 0}
+        else:
+            reward_dict = {self.current_player: reward, 1 - self.current_player: -reward}
         return {
             "action_mask": self.get_action_mask(),
-            "current_player": self.current_player
+            "current_player": self.current_player,
+            "reward_dict": reward_dict
         }
 
     def reset(self, seed = None, options=None):
@@ -161,7 +166,9 @@ class HanafudaEnv(gym.Env):
         执行动作，返回新的状态、奖励、是否终止、是否截断和额外信息。
         """
         player_id = self.rules.current_player
+        former_points = self.rules.yaku_points[player_id]
         mask = self.get_action_mask()
+
         terminated = False # 游戏继续
         truncated = False
 
@@ -173,15 +180,16 @@ class HanafudaEnv(gym.Env):
             truncated = False
 
         self.rules.perform_action(action, player_id)
+        latter_points = self.rules.yaku_points[player_id]
 
         terminated = self.rules.game_over # 判断终止
-        reward = self._calculate_reward() # 计算奖励
+        reward = self._calculate_reward(former_points, latter_points) # 计算奖励
 
         self.current_player = self.rules.current_player # 更新当前玩家
 
         # 返回新状态
         observation = self._get_obs(self.current_player)
-        info = self._get_info()
+        info = self._get_info(reward)
 
         return observation, reward, terminated, truncated, info
 
@@ -193,11 +201,19 @@ class HanafudaEnv(gym.Env):
             
         return mask
 
-    def _calculate_reward(self):
+    def _calculate_reward(self, former_points, latter_points):
         """
         计算奖励。
         """
-        return None
+        if not self.rules.game_over:
+            return (latter_points - former_points) * 0.1
+        else:
+            if self.rules.game_result == self.current_player: # 智能体获胜
+                return self.rules.yaku_points[self.current_player]
+            elif self.rules.game_result == 1 - self.current_player: # 智能体失败
+                return - self.rules.yaku_points[1 - self.current_player]
+            else:
+                return 0.
 
     def render(self):
         """
