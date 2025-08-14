@@ -76,6 +76,8 @@ class HanafudaEnv(gym.Env):
         更新并输出当前状态（指定玩家）。
         """
         opp_id = 1 - player_id
+        # 更新阶段
+        self._turn_phase = self.rules.turn_phase
 
         # 从规则引擎获取全局信息
         hand = self.rules.player_hands[player_id]
@@ -105,8 +107,8 @@ class HanafudaEnv(gym.Env):
         self._deck_remaining[0] = len(self.rules.draw_pile) / 24
 
         # 更新当前役分
-        self._current_scores[0] = self.rules.yaku_points[player_id]
-        self._current_scores[1] = self.rules.yaku_points[opp_id]
+        self._current_scores[0] = np.tanh(self.rules.yaku_points[player_id] / 5.0)
+        self._current_scores[1] = np.tanh(self.rules.yaku_points[opp_id] / 5.0)
 
         # 更新叫牌情况
         self._koikoi_flags[0] = self.rules.koikoi_flags[player_id]
@@ -115,9 +117,6 @@ class HanafudaEnv(gym.Env):
         # 更新役进度
         self._my_yaku_progress = self.rules.yaku_progress[player_id]
         self._opp_yaku_progress = self.rules.yaku_progress[opp_id]
-
-        # 更新阶段
-        self._turn_phase = self.rules.turn_phase
 
         return {
             "hand": self._hand, 
@@ -133,7 +132,7 @@ class HanafudaEnv(gym.Env):
             "turn_phase": self._turn_phase,
         }
     
-    def _get_info(self, reward):
+    def _get_info(self, reward = 0):
         """
         输出动作掩码和当前玩家信息。
         """
@@ -179,13 +178,14 @@ class HanafudaEnv(gym.Env):
             terminated = False # 或者 True，取决于你希望智能体如何学习
             truncated = False
 
-        self.rules.perform_action(action, player_id)
-        latter_points = self.rules.yaku_points[player_id]
+        else:
+            self.rules.perform_action(action, player_id)
+            latter_points = self.rules.yaku_points[player_id]
 
-        terminated = self.rules.game_over # 判断终止
-        reward = self._calculate_reward(former_points, latter_points) # 计算奖励
+            terminated = self.rules.game_over # 判断终止
+            reward = self._calculate_reward(former_points, latter_points) # 计算奖励
 
-        self.current_player = self.rules.current_player # 更新当前玩家
+            self.current_player = self.rules.current_player # 更新当前玩家
 
         # 返回新状态
         observation = self._get_obs(self.current_player)

@@ -1,80 +1,176 @@
 import os
 from datetime import datetime
+import gymnasium as gym
+
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.maskable.policies import MaskableMultiInputActorCriticPolicy
 from sb3_contrib.common.wrappers import ActionMasker
+from stable_baselines3.common.vec_env import SubprocVecEnv
 
-# 导入您的花札环境
+# 导入您的花札环境和随机智能体
 from hanafuda_rl.envs.hanafuda_env import HanafudaEnv
+from hanafuda_rl.agents.random_agent import RandomAgent
 
-# --- 1. 定义一些常量 ---
-# 日志和模型保存的根目录
-LOG_DIR = "results/logs"
-MODEL_DIR = "results/models"
-# 为这次训练创建一个唯一的文件夹名
+# --- 1. 定义一个包装器，用于处理“RL vs 对手”的逻辑 ---
+class SelfPlayEnvWrapper(gym.Wrapper):
+    """
+    一个包装器，让一个RL智能体可以和另一个固定策略的智能体对战。
+    这个包装器将二人游戏转换为对于RL智能体来说的单人游戏。
+    """
+    def __init__(self, env, opponent_agent):
+        super().__init__(env)
+        self.opponent_agent = opponent_agent
+        self.rl_player_id = 0  # 假定RL智能体总是玩家0
+
+    def get_action_mask(self):
+        """
+        将底层环境的 get_action_mask 方法暴露出来。
+        MaskablePPO 会检查这个方法是否存在来确认环境是否支持掩码。
+        """
+        return self.env.unwrapped.get_action_mask()
+
+    def reset(self, **kwargs):
+        """
+        重置环境，并确保如果对手先手，则让其完成回合。
+        【关键修复】: 此方法现在确保始终返回 (obs, info) 2元组。
+        """
+        obs, info = self.env.reset(**kwargs)
+        # 如果开局是对手先手
+        if self.env.unwrapped.current_player != self.rl_player_id:
+            # 让对手一直玩，直到轮到我们
+            obs, _, _, _, info = self._opponent_play_until_our_turn(info)
+        return obs, info
+
+    def step(self, action):
+        """
+        RL智能体执行一步，然后让对手一直玩，直到再次轮到RL智能体。
+        """
+        # RL智能体执行动作
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        
+        # 如果游戏没有因RL智能体的动作而结束，并且轮到对手了
+        if not (terminated or truncated) and self.env.unwrapped.current_player != self.rl_player_id:
+            obs, opp_reward, terminated, truncated, info = self._opponent_play_until_our_turn(info)
+        
+        return obs, reward, terminated, truncated, info
+
+    def _opponent_play_until_our_turn(self, info):
+        """
+        让对手一直行动，直到再次轮到RL智能体或者游戏结束。
+        这个辅助函数返回完整的5元组，供 step 和 reset 方法内部使用。
+        """
+        accumulated_reward = 0.0
+        terminated, truncated = False, False
+        obs = None # 在循环开始前初始化
+
+        # 只要当前玩家是对手，并且游戏没有结束
+        while self.env.unwrapped.current_player != self.rl_player_id:
+            # 从环境中获取最新的掩码给对手
+            action_mask = self.env.unwrapped.get_action_mask()
+            
+            # 使用对手的策略选择动作
+            opponent_action = self.opponent_agent.select_action(obs, action_mask)
+            
+            # 在环境中执行对手的动作
+            obs, reward, terminated, truncated, info = self.env.step(opponent_action)
+            accumulated_reward += reward
+
+            if terminated or truncated:
+                break
+        
+        # 如果循环从未执行（例如，对手回合开始时游戏就已结束），obs会是None
+        # 在这种情况下，我们需要从环境中获取一次当前的观测状态
+        if obs is None:
+            obs = self.env.unwrapped._get_obs(self.rl_player_id)
+        
+        return obs, accumulated_reward, terminated, truncated, info
+
+# --- 2. 定义一些常量 ---
+LOG_DIR = "Hanafuda-Project/hanafuda_rl/results/logs"
+MODEL_DIR = "Hanafuda-Project/hanafuda_rl/results/models"
 TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
-# 总训练步数
-TOTAL_TIMESTEPS = 1_000_000 # 先用一个较小的步数测试流程，例如 10万步
+TOTAL_TIMESTEPS = 100_000 # 对于单环境，可以先从10万步开始
+# 对于单环境，我们调低n_steps，以增加更新频率，更快看到学习效果
+N_STEPS = 2048
+N_ENVS = 6 # 多线程并行
+SEED = 99
+
+# 一个辅助函数，用于创建和包装单个环境实例
+def make_env_func(rank, seed=99):
+    """
+    一个辅助函数，返回一个创建环境的函数。
+    这是 SubprocVecEnv 所需的格式。
+    """
+    def _init():
+        # 为每个环境设置不同的种子，以增加多样性
+        opponent_seed = seed + rank
+        env_seed = seed + rank
+
+        opponent = RandomAgent(seed=opponent_seed)
+        env = HanafudaEnv()
+        env.reset(seed=env_seed) # 确保环境被正确播种
+        
+        # 按顺序包装
+        env = SelfPlayEnvWrapper(env, opponent_agent=opponent)
+        env = ActionMasker(env, action_mask_fn=lambda env: env.get_action_mask())
+        return env
+    return _init
 
 def train_agent():
-    """
-    最简单的训练函数
-    """
-    # --- 2. 创建并包装环境 ---
-    # MaskablePPO 需要一个特殊的包装器来处理 action_mask
-    # 我们先创建一个普通的 Gym 环境
-    env = HanafudaEnv(render_mode=None) 
+    """主训练函数 (并行版)"""
     
-    # 然后用 ActionMasker 包装它。这个包装器会从 info dict 中提取 "action_mask"
-    # 并将其提供给 MaskablePPO
-    env = ActionMasker(env, action_mask_fn=lambda env: env.get_action_mask())
+    # --- 3. 创建并包装环境 (现在是并行化的) ---
+    print(f"Creating and wrapping {N_ENVS} parallel environments...")
+    
+    # 创建一个包含多个环境的向量化环境 (Vectorized Environment)
+    # 每个环境都在自己的进程中运行
+    vec_env = SubprocVecEnv([make_env_func(i, SEED) for i in range(N_ENVS)])
 
-    # --- 3. 定义模型 ---
-    # MaskablePPO 会自动处理 Dict Observation Space 和 Action Mask
-    # 我们使用 MaskableMultiInputActorCriticPolicy，因为它天生支持 Dict 观测空间
+    # --- 4. 定义模型 ---
+    # batch_size 可以适当增加，以匹配更大的数据吞吐量
+    # (n_steps * n_envs) / n_epochs = (2048 * 8) / 10 = 1638.4
+    # batch_size=128 或 256 是合理的值
     model = MaskablePPO(
         MaskableMultiInputActorCriticPolicy,
-        env,
-        verbose=1,  # 打印训练过程中的信息
-        tensorboard_log=LOG_DIR, # 指定 TensorBoard 日志目录
-        learning_rate=3e-4,     # 学习率，一个常用的默认值
-        n_steps=128,           # 每次更新模型前，每个环境要跑多少步
-        batch_size=64,          # mini-batch 的大小
-        gamma=0.99              # 折扣因子
+        vec_env,  # 将并行环境传递给模型
+        verbose=1,
+        tensorboard_log=LOG_DIR,
+        learning_rate=3e-4,
+        n_steps=N_STEPS,
+        batch_size=128, # 增加 batch_size
+        n_epochs=10,
+        gamma=0.99,
+        clip_range=0.2,
     )
 
-    # --- 4. 开始训练 ---
-    print("="*20)
-    print("Start training MaskablePPO model...")
-    print(f"Total Steps: {TOTAL_TIMESTEPS}")
-    print(f"Log file will be save in: {LOG_DIR}/{TIMESTAMP}")
-    print("="*20)
+    # --- 5. 开始训练 ---
+    print("="*30)
+    print(f"Starting parallel training ({N_ENVS} envs): RL Agent vs. RandomAgent")
+    print(f"Total Timesteps: {TOTAL_TIMESTEPS}")
+    print(f"Logs will be saved to: {LOG_DIR}/MaskablePPO_{TIMESTAMP}")
+    print("="*30)
     
-    # model.learn() 会自动处理训练循环
-    # tb_log_name 参数会为这次运行在 tensorboard_log 目录下创建一个子文件夹
     model.learn(
         total_timesteps=TOTAL_TIMESTEPS,
-        tb_log_name=f"MaskablePPO_{TIMESTAMP}"
+        tb_log_name=f"MaskablePPO_{TIMESTAMP}",
+        progress_bar=True
     )
 
-    # --- 5. 保存模型 ---
-    # 创建模型保存目录（如果不存在）
-    os.makedirs(MODEL_DIR, exist_ok=True)
+    # --- 6. 保存模型 ---
     model_path = os.path.join(MODEL_DIR, f"hanafuda_ppo_{TOTAL_TIMESTEPS}.zip")
     model.save(model_path)
-
-    print("="*20)
+    print("="*30)
     print("Training completed!")
-    print(f"Model saved in: {model_path}")
-    print("="*20)
+    print(f"Model saved to: {model_path}")
+    print("="*30)
 
-    # --- 6. (可选) 关闭环境 ---
-    env.close()
-
+    # --- 7. 关闭环境 ---
+    vec_env.close()
 
 if __name__ == '__main__':
     # 确保文件夹存在
     os.makedirs(LOG_DIR, exist_ok=True)
     os.makedirs(MODEL_DIR, exist_ok=True)
     
+    # 开始训练
     train_agent()

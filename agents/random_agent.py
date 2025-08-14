@@ -1,11 +1,10 @@
 import numpy as np
 
 class RandomAgent:
-    def __init__(self, action_space, seed = None):
+    def __init__(self, seed = None):
         """
         一个简单的随机智能体，它从合法的动作掩码中随机选择一个动作。
         """
-        self.action_space = action_space
         self.np_random = np.random.default_rng(seed)
 
     def select_action(self, observation, action_mask):

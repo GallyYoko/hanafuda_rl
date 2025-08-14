@@ -196,7 +196,7 @@ class HanafudaRules:
         self.game_over = False  # 游戏是否结束
         self.game_result = None # 游戏是否结束（None：未结束，-1：平局，0：玩家0获胜，1：玩家1获胜）
 
-    def reset(self, np_random = None):
+    def reset(self, np_random = np.random.default_rng()):
         """
         重置游戏状态，返回初始发牌结果。
         同时检查手牌是否符合"手四"或"食付"条件。
@@ -208,7 +208,7 @@ class HanafudaRules:
         self.yaku_list = {0: [], 1: []}
         self.yaku_progress = {0: np.zeros(11, dtype=np.float32), 1: np.zeros(11, dtype=np.float32)}
         self.drawn_card = None
-        self.current_player = 0
+        self.current_player = np_random.choice([0, 1])
         self.turn_phase = 0
         self.game_over = False
         self.game_result = None
@@ -293,13 +293,13 @@ class HanafudaRules:
 
         elif self.turn_phase == 1: # 抽牌配对阶段
             draw_choice = action - 32
-            self._judge_draw(draw_choice, draw_choice, player_id) # 处理配对
+            self._judge_draw(draw_choice, player_id) # 处理配对
 
         elif self.turn_phase == 2: # 出牌后叫牌阶段
             koikoi = action - 36
             self._judge_koikoi(koikoi, player_id)
             if not self.game_over:
-                self.turn_phase = 1 # 进入抽牌配对阶段
+                self._draw_card(player_id) # 进入抽牌阶段
 
         else: # 抽牌后叫牌阶段
             koikoi = action - 36

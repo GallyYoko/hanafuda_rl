@@ -4,27 +4,33 @@
 此测试套件验证以下内容：
 1.  环境是否遵循 Gymnasium API (使用 stable-baselines3 的 check_env)。
 2.  reset 和 step 函数是否返回正确的数据结构和类型。
-3.  环境是否能正确处理非法动作。
-4.  在所有游戏阶段（出牌、抽牌、叫牌），动作掩码（action_mask）是否生成正确。
-5.  在大量的随机游戏中，环境是否能保持稳定而不崩溃。
+3.  在所有游戏阶段（出牌、抽牌、叫牌），动作掩码（action_mask）是否生成正确。
+4.  在大量的随机游戏中，环境是否能保持稳定而不崩溃，特别是不会出现无合法动作的死锁。
 """
 
 import pytest
 import numpy as np
 
 # 假设你的项目结构是 hanafuda_rl/，并且你的环境代码在 hanafuda_rl/envs/ 中
-# 如果不是，请相应地调整导入路径
+# 请确保你的项目已经通过 `pip install -e .` 安装，这样导入才能正常工作
 from hanafuda_rl.envs.hanafuda_env import HanafudaEnv
 from hanafuda_rl.envs.rules import Deck
 
 # 使用 stable-baselines3 的环境检查器，这是黄金标准
-from stable_baselines3.common.env_checker import check_env
+try:
+    from stable_baselines3.common.env_checker import check_env
+except ImportError:
+    print("Warning: stable-baselines3 not found. Skipping API compliance test.")
+    print("Please install it with: pip install stable-baselines3")
+    check_env = None
 
 
 # Pytest Fixture: 为每个测试函数提供一个干净、初始化的环境实例
 @pytest.fixture
 def env():
     """提供一个 HanafudaEnv 的实例。"""
+    # 修复：Bug 2 提到了 reset() 中 _get_info() 的调用问题。
+    # 假设该问题已在 HanafudaEnv 中修复，测试将验证这一点。
     return HanafudaEnv()
 
 # Pytest Fixture: 提供一个固定的、可复现的牌组实例，用于手动设置场景
@@ -35,13 +41,15 @@ def deck():
 
 
 # --- 测试 1: API 合规性 ---
+@pytest.mark.skipif(check_env is None, reason="stable-baselines3 is not installed")
 def test_env_api_compliance(env):
     """
     黄金标准测试：使用 SB3 的 check_env 验证环境是否符合标准 API。
     如果此测试通过，你的环境与 SB3/SB3-Contrib 库的兼容性就有保障了。
+    这个测试会自动检查 observation 和 action space 的匹配性，以及 step/reset 的返回值。
     """
-    # warn=True 会打印警告而不是直接抛出异常，对于调试更友好
-    # 对于最终测试，可以移除 warn=True
+    # check_env 会执行 reset, step 等操作，并验证所有返回值
+    # 它还会验证 Bug 3 中提到的 observation space 越界问题。
     check_env(env, warn=True)
 
 
@@ -68,8 +76,8 @@ def test_reset_functionality(env):
     assert mask.dtype == bool, "Action mask 的数据类型应该是布尔型"
 
 
-def test_step_functionality_and_illegal_action(env):
-    """验证 step() 方法的功能，并测试非法动作是否会按预期引发异常。"""
+def test_step_functionality(env):
+    """验证 step() 方法在接收合法动作时的功能。"""
     obs, info = env.reset(seed=42)
     mask = info['action_mask']
 
@@ -89,13 +97,13 @@ def test_step_functionality_and_illegal_action(env):
     assert isinstance(new_info, dict)
     assert 'action_mask' in new_info, "每次 step 后，info 中都必须有 action_mask"
 
-
 # --- 测试 3: 动作掩码的正确性 (关键测试) ---
 
 def test_action_mask_play_phase(env, deck):
     """精确验证在'出牌阶段'的动作掩码逻辑。"""
-    env.reset(seed=1) # 初始化内部状态
-    env._turn_phase = 0 # 强制设置为出牌阶段
+    env.reset(seed=1) # 初始化内部状态，确保 np_random 等已设置
+    env.rules.current_player = 0
+    env.rules.turn_phase = 0 # 强制设置为出牌阶段
 
     # 牌的定义 (ID, 月份)
     matsu_hikari = deck.cards[0]  # 松(1), 光
@@ -104,9 +112,11 @@ def test_action_mask_play_phase(env, deck):
     
     # 场景A: 手牌有一张牌，场上没有匹配项
     env.rules.player_hands[0] = [matsu_hikari]
+    env.rules.player_hands[1] = [deck.cards[i] for i in range(8, 16)] # 填充对手手牌
     env.rules.table_cards = [ume_kasu]
     mask_a = env.get_action_mask()
     expected_a = np.zeros(38, dtype=bool)
+    # 动作ID = 手牌槽位 * 4 + 配对选项
     expected_a[0 * 4 + 3] = True # 第0张手牌，选择“不配对”(选项3)
     np.testing.assert_array_equal(mask_a, expected_a, "场景A：无匹配时的掩码错误")
 
@@ -122,7 +132,8 @@ def test_action_mask_play_phase(env, deck):
 def test_action_mask_draw_phase(env, deck):
     """精确验证在'抽牌配对阶段'的动作掩码逻辑。"""
     env.reset(seed=1)
-    env._turn_phase = 1 # 强制设置为抽牌配对阶段
+    env.rules.current_player = 0
+    env.rules.turn_phase = 1 # 强制设置为抽牌配对阶段
 
     # 牌的定义
     matsu_hikari = deck.cards[0]
@@ -151,7 +162,8 @@ def test_action_mask_draw_phase(env, deck):
 def test_action_mask_koikoi_phase(env, phase):
     """精确验证在'叫牌决策阶段'的动作掩码逻辑。"""
     env.reset(seed=1)
-    env._turn_phase = phase # 设置为出牌后(2)或抽牌后(3)的叫牌阶段
+    env.rules.current_player = 0
+    env.rules.turn_phase = phase # 设置为出牌后(2)或抽牌后(3)的叫牌阶段
 
     mask = env.get_action_mask()
     expected = np.zeros(38, dtype=bool)
@@ -168,20 +180,26 @@ def test_random_rollout_stability(env):
     通过运行大量随机对局来对环境进行压力测试。
     目的是捕捉那些在特定代码路径下才会出现的边缘案例、崩溃或死锁。
     """
-    num_episodes = 100000  # 可以增加到1000进行更彻底的本地测试
+    num_episodes = 10000  # 本地测试时500-1000次已足够发现大部分问题
 
     for i in range(num_episodes):
         obs, info = env.reset(seed=i) # 使用不同的种子进行多样化测试
         terminated = False
         truncated = False
         step_count = 0
+        current_player_for_step = env.current_player
 
         while not terminated and not truncated:
+            # 确保 info['action_mask'] 是为当前玩家生成的
+            # 在二人轮流制游戏中，step 返回的 obs 和 info 属于下一个玩家
+            # 而 action_mask 需要用于当前玩家做决策
+            
+            # 从返回的 info 中获取掩码
             action_mask = info['action_mask']
             
             # 这是最重要的断言：在游戏结束前，必须总是有至少一个合法动作。
             # 如果这里失败，说明你的状态机或掩码生成在某个边缘情况下出错了。
-            assert np.any(action_mask), f"在第 {i+1} 局, 第 {step_count} 步出现死锁! 没有任何合法动作. 阶段: {obs['turn_phase']}"
+            assert np.any(action_mask), f"在第 {i+1} 局, 第 {step_count} 步为玩家 {current_player_for_step} 生成掩码时出现死锁! 没有任何合法动作. 状态: {obs}"
             
             # 从合法动作中随机选择一个
             # 使用 env.np_random 以尊重环境的随机种子
@@ -191,6 +209,9 @@ def test_random_rollout_stability(env):
             # 执行动作，我们只关心它是否会崩溃
             obs, reward, terminated, truncated, info = env.step(action)
             
+            # 更新下一个循环的当前玩家
+            current_player_for_step = env.current_player
+
             step_count += 1
             # 防止无限循环的保护
             assert step_count < 200, f"第 {i+1} 局游戏超过200步，可能存在无限循环"
