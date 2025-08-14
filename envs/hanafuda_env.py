@@ -67,11 +67,58 @@ class HanafudaEnv(gym.Env):
 
         # 定义动作集
         self.action_space = gym.spaces.Discrete(8*4+4+2)  # 手牌选择 * 场牌配对 + 抽牌配对 + 叫牌
+
+        # 跟踪当前玩家
+        self.current_player = 0 
     
-    def _get_obs(self):
+    def _get_obs(self, player_id):
         """
-        输出当前状态。
+        更新并输出当前状态（指定玩家）。
         """
+        opp_id = 1 - player_id
+
+        # 从规则引擎获取全局信息
+        hand = self.rules.player_hands[player_id]
+        table = self.rules.table_cards
+        my_collected_cards = self.rules.collected_cards[player_id]
+        opp_collected_cards = self.rules.collected_cards[opp_id]
+
+        # 清空牌组状态
+        self._hand.fill(0)
+        self._table.fill(0)
+        self._my_collected.fill(0)
+        self._opp_collected.fill(0)
+
+        # 更新牌面信息
+        for card in hand: self._hand[card.card_id] = 1
+        for card in table: self._table[card.card_id] = 1
+        for card in my_collected_cards: self._my_collected[card.card_id] = 1
+        for card in opp_collected_cards: self._opp_collected[card.card_id] = 1
+
+        # 更新抽牌
+        if self._turn_phase == 1:
+            self._drawn_card = self.rules.drawn_card.card_id
+        else:
+            self._drawn_card = 48
+
+        # 更新山牌剩余数
+        self._deck_remaining[0] = len(self.rules.draw_pile) / 24
+
+        # 更新当前役分
+        self._current_scores[0] = self.rules.yaku_points[player_id]
+        self._current_scores[1] = self.rules.yaku_points[opp_id]
+
+        # 更新叫牌情况
+        self._koikoi_flags[0] = self.rules.koikoi_flags[player_id]
+        self._koikoi_flags[1] = self.rules.koikoi_flags[opp_id]
+
+        # 更新役进度
+        self._my_yaku_progress = self.rules.yaku_progress[player_id]
+        self._opp_yaku_progress = self.rules.yaku_progress[opp_id]
+
+        # 更新阶段
+        self._turn_phase = self.rules.turn_phase
+
         return {
             "hand": self._hand, 
             "table": self._table,
@@ -88,10 +135,11 @@ class HanafudaEnv(gym.Env):
     
     def _get_info(self):
         """
-        输出得分信息。
+        输出动作掩码和当前玩家信息。
         """
         return {
-            "action_mask": self.get_action_mask()
+            "action_mask": self.get_action_mask(),
+            "current_player": self.current_player
         }
 
     def reset(self, seed = None, options=None):
@@ -100,35 +148,10 @@ class HanafudaEnv(gym.Env):
         """
         super().reset(seed=seed)
         self.rules.reset(np_random=self.np_random)
-
-        # 从规则引擎获取初始手牌和场牌
-        self._hand = np.zeros(48, dtype=np.int8)
-        self._table = np.zeros(48, dtype=np.int8)
-        hand = self.rules.player_hands[0]
-        table = self.rules.table_cards
-
-        # 更新手牌状态
-        for card in hand:
-            self._hand[card.card_id] = 1
-
-        # 更新场牌状态
-        for card in table:
-            self._table[card.card_id] = 1
-
-        # 更新收集区信息
-        self._my_collected = np.zeros(48, dtype=np.int8)
-        self._opp_collected = np.zeros(48, dtype=np.int8)
-
-        # 更新其他信息
-        self._drawn_card = 48
-        self._deck_remaining = np.array([1.], dtype=np.float32)
-        self._current_scores = np.zeros(2, dtype=np.float32)
-        self._koikoi_flags = np.zeros(2, dtype=np.int8)
-        self._my_yaku_progress = np.zeros(11, dtype=np.float32)
-        self._opp_yaku_progress = np.zeros(11, dtype=np.float32)
+        self.current_player = self.rules.current_player
         self._turn_phase = 0
 
-        observation = self._get_obs()
+        observation = self._get_obs(self.current_player)
         info = self._get_info()
 
         return observation, info
@@ -137,8 +160,10 @@ class HanafudaEnv(gym.Env):
         """
         执行动作，返回新的状态、奖励、是否终止、是否截断和额外信息。
         """
+        player_id = self.rules.current_player
         mask = self.get_action_mask()
         terminated = False # 游戏继续
+        truncated = False
 
         if not mask[action]:
             # 如果出现非法动作，不报错，而是惩罚智能体并保持状态不变
@@ -147,283 +172,32 @@ class HanafudaEnv(gym.Env):
             terminated = False # 或者 True，取决于你希望智能体如何学习
             truncated = False
 
-        elif self._turn_phase == 0:  # 出牌阶段
+        self.rules.perform_action(action, player_id)
 
-            if not self.rules.player_hands[0]:
-                terminated = True  # 游戏结束
+        terminated = self.rules.game_over # 判断终止
+        reward = self._calculate_reward() # 计算奖励
 
-                reward = 0.
-                
-            else:
-                # 解析动作
-                play_card_idx, match_choice = self._action[action]    
-                # 获取玩家手牌中的目标牌
-                card_to_play = self.rules.player_hands[0][play_card_idx]            
-                # 调用规则引擎的出牌逻辑
-                self.rules.play_card(card_to_play.card_id, match_choice)
-                # 游戏阶段更新
-                if self.rules.turn_phase == 2:
-                    # 奖励 = 当前分数 - 上一次分数
-                    reward = (self.rules.yaku_points[0] - self._current_scores[0]) * 0.1
-                    # 游戏阶段更新
-                    self._turn_phase = 2  # 出牌后叫牌阶段
-                else:
-                    if len(self.rules.collected_cards[0]) > self._my_collected.sum():
-                        reward = 0.  # 匹配奖励
-                    else:
-                        reward = 0.  # 无匹配惩罚
-                    # 游戏阶段更新
-                    self._turn_phase = 1  # 抽牌阶段
-                    # 抽牌动作
-                    self.rules.draw_card()
-                    # 抽牌更新
-                    self._drawn_card = self.rules.drawn_card.card_id
-        
-        elif self._turn_phase == 1:  # 抽牌阶段
-            # 解析动作
-            draw_choice = self._action[action]
-            # 调用规则引擎的配对逻辑
-            self.rules.judge_draw_card(draw_choice)
-            # 游戏阶段更新
-            if self.rules.turn_phase == 3:
-                # 奖励 = 当前分数 - 上一次分数
-                reward = (self.rules.yaku_points[0] - self._current_scores[0]) * 0.1
-                # 游戏阶段更新
-                self._turn_phase = 3  # 抽牌后叫牌阶段
-            else:
-                reward = 0. # 无奖励
-                # 游戏阶段更新
-                self.rules.switch_player() # 切换玩家
-                self._opp_turn() # 对手回合
-                self.rules.switch_player() # 切换玩家
-                self._turn_phase = 0  # 出牌阶段
-        
-        elif self._turn_phase == 2:  # 出牌后叫牌阶段
-            # 解析动作
-            koikoi = self._action[action]
-            # 更新叫牌标志
-            self._koikoi_flags[0] = koikoi
-            if koikoi == 1:  # 选择继续
-                self.rules.judge_koikoi(True)
-                reward = 0.5  # 鼓励叫牌探索
-                # 游戏阶段更新
-                self._turn_phase = 1  # 抽牌阶段
-                # 抽牌动作
-                self.rules.draw_card()
-                # 抽牌更新
-                self._drawn_card = self.rules.drawn_card.card_id
-            else:  # 选择不继续
-                self.rules.judge_koikoi(False)
-                # 游戏结束
-                terminated = True
-                # 奖励为当前役分
-                reward = self.rules.yaku_points[0]
-        
-        else:  # 抽牌后叫牌阶段
-            # 解析动作
-            koikoi = self._action[action]
-            # 更新叫牌标志
-            self._koikoi_flags[0] = koikoi
-            if koikoi == 1:  # 选择继续
-                self.rules.judge_koikoi(True)
-                reward = 0.5  # 鼓励叫牌探索
-                # 游戏阶段更新
-                self.rules.switch_player() # 切换玩家
-                self._opp_turn()  # 对手回合
-                self.rules.switch_player() # 切换玩家
-                self._turn_phase = 0  # 出牌阶段
-            else:  # 选择不继续
-                self.rules.judge_koikoi(False)
-                # 游戏结束
-                terminated = True
-                # 奖励为当前役分
-                reward = self.rules.yaku_points[0]
-
-        # 检查对手是否结束
-        if self.rules.game_over and not terminated:
-            terminated = True
-            # 如果对手赢了
-            if self.rules.game_result == 'player1_win':
-                # 惩罚为对手分数
-                reward = -self.rules.yaku_points[1]
-            # 如果是平局
-            else:
-                reward = 0.
-        
-        # 更新环境状态
-        self._update_obs()
+        self.current_player = self.rules.current_player # 更新当前玩家
 
         # 返回新状态
-        observation = self._get_obs()
+        observation = self._get_obs(self.current_player)
         info = self._get_info()
-        truncated = False
+
         return observation, reward, terminated, truncated, info
 
     def get_action_mask(self):
         """
         根据当前游戏阶段和局面，生成合法的动作掩码。
         """
-        mask = np.zeros(38, dtype=bool)  # 默认所有动作都非法
-
-        if self._turn_phase == 0:  # 0: 出牌阶段
-            # 遍历8个手牌槽位
-            hand = self.rules.player_hands[0]
-            for i, hand_card in enumerate(hand):
-                # 查找场上同月牌
-                matching_table_cards = [
-                    card for card in self.rules.table_cards
-                    if card.month == hand_card.month
-                ]
-                
-                if not matching_table_cards:
-                    # 如果没有同月牌，只有“不配对”（选项3）是合法的
-                    mask[i * 4 + 3] = True
-                else:
-                    # 如果有同月牌，可以选择配对其中任意一张
-                    for j in range(len(matching_table_cards)):
-                        mask[i * 4 + j] = True
-        
-        elif self._turn_phase == 1:  # 1: 抽牌配对阶段
-            # 获取抽出的牌
-            drawn_card = self.rules.drawn_card
-            # 查找场上同月牌
-            matching_table_cards = [
-                card for card in self.rules.table_cards
-                if card.month == drawn_card.month
-            ]
-
-            if not matching_table_cards:
-                # 如果没有同月牌，只有“不配对”（选项3，对应动作ID 35）是合法的
-                mask[32 + 3] = True
-            else:
-                # 如果有同月牌，可以选择配对其中任意一张
-                for j in range(len(matching_table_cards)):
-                    mask[32 + j] = True
-
-        elif self._turn_phase == 2 or self._turn_phase == 3:  # 2 & 3: 叫牌决策阶段
-            # 动作36（叫牌）和37（结束）都是合法的
-            mask[36] = True
-            mask[37] = True
+        mask = self.rules.get_legal_actions_mask(self.current_player)
             
         return mask
 
-    def _update_obs(self):
+    def _calculate_reward(self):
         """
-        更新状态。
+        计算奖励。
         """
-        hand = self.rules.player_hands[0]
-        table = self.rules.table_cards
-        collected_cards = self.rules.collected_cards
-
-        # 清空牌组状态
-        self._hand.fill(0)
-        self._table.fill(0)
-        self._my_collected.fill(0)
-        self._opp_collected.fill(0)
-
-        # 更新手牌状态
-        for card in hand:
-            self._hand[card.card_id] = 1
-
-        # 更新场牌状态
-        for card in table:
-            self._table[card.card_id] = 1
-
-        # 更新收集牌状态
-        for card in collected_cards[0]:
-            self._my_collected[card.card_id] = 1
-        for card in collected_cards[1]:
-            self._opp_collected[card.card_id] = 1
-
-        # 更新抽牌
-        if self._turn_phase == 1:
-            self._drawn_card = self.rules.drawn_card.card_id
-        else:
-            self._drawn_card = 48
-
-        # 更新山牌剩余数
-        self._deck_remaining[0] = len(self.rules.draw_pile) / 24
-
-        # 更新当前役分
-        self._current_scores[0] = self.rules.yaku_points[0]
-        self._current_scores[1] = self.rules.yaku_points[1]
-
-        # 更新叫牌情况
-        self._koikoi_flags[0] = self.rules.koikoi_flags[0]
-        self._koikoi_flags[1] = self.rules.koikoi_flags[1]
-
-        # 更新役进度
-        self._my_yaku_progress = self.rules.yaku_progress[0]
-        self._opp_yaku_progress = self.rules.yaku_progress[1]
-
-    def _opp_turn(self):
-        """
-        对手回合：调用引擎模拟对手的动作（随机打出手牌）。
-        """
-         # 确保当前玩家是对手 (player 1)
-        if self.rules.current_player != 1:
-            raise ValueError(f"Illegal player: {self.rules.current_player}")
-        
-        # 对手出牌阶段
-        opp_hand = self.rules.player_hands[1]
-        if not opp_hand:
-            self.rules.game_over = True
-            return
-        
-        # 随机选择一张手牌打出
-        card_to_play = self.np_random.choice(opp_hand)
-
-        # 查找场上所有合法的配对选项
-        table_matches = [card for card in self.rules.table_cards if card.month == card_to_play.month]
-
-        if not table_matches:
-        # 没有可配对的牌，只能选择“不配对”（选项3）
-            match_choice = 3
-        else:
-            # 从合法的配对选项中随机选择一个
-            match_choice = self.np_random.integers(0, len(table_matches))
-
-        # 执行出牌动作，这会更新牌局并可能改变 turn_phase
-        self.rules.play_card(card_to_play.card_id, match_choice)
-
-        if self.rules.turn_phase == 2:  # 轮到对手叫牌
-            # 随机决定是否叫牌 (50%概率)
-            if self.np_random.choice([True, False]):
-                # 决定叫牌 (Koi-Koi)
-                self.rules.judge_koikoi(True)
-                self.rules.turn_phase = 0 # 状态重置，准备抽牌
-            else:
-                # 决定结束游戏
-                self.rules.judge_koikoi(False)
-                return # 对手回合结束，游戏结束
-            
-        self.rules.draw_card() # 从牌堆抽牌
-        drawn_card = self.rules.drawn_card
-
-        # 查找抽出的牌在场上的配对选项
-        draw_matches = [card for card in self.rules.table_cards if card.month == drawn_card.month]
-
-        if not draw_matches:
-            draw_choice = 3 # 不配对
-        else:
-            draw_choice = self.np_random.integers(0, len(draw_matches))
-
-        # 执行抽牌配对，这会再次更新牌局并可能改变 turn_phase
-        self.rules.judge_draw_card(draw_choice)
-
-        if self.rules.turn_phase == 3: # 轮到对手叫牌
-            # 再次随机决定是否叫牌
-            if self.np_random.choice([True, False]):
-                self.rules.judge_koikoi(True)
-                # 对手叫牌后，其回合结束
-            else:
-                self.rules.judge_koikoi(False)
-                return # 对手回合结束，游戏结束
-            
-        # 检查对手手牌是否在此回合中打完
-        if not self.rules.player_hands[1]:
-            self.rules.game_over = True
-            return
+        return None
 
     def render(self):
         """
