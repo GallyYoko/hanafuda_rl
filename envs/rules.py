@@ -289,11 +289,11 @@ class HanafudaRules:
             else:
                 play_card, match_choice = divmod(action, 4)
                 card_to_play = self.player_hands[player_id][play_card]
-                self._play_card(card_to_play, match_choice) # 出牌
+                self._play_card(card_to_play, match_choice, player_id) # 出牌
 
         elif self.turn_phase == 1: # 抽牌配对阶段
             draw_choice = action - 32
-            self._judge_draw(draw_choice, draw_choice) # 处理配对
+            self._judge_draw(draw_choice, draw_choice, player_id) # 处理配对
 
         elif self.turn_phase == 2: # 出牌后叫牌阶段
             koikoi = action - 36
@@ -473,9 +473,10 @@ class HanafudaRules:
         判断是否叫牌
         """
         if not koikoi:
+            self.koikoi_flags[player_id] = 0
             self._end_game(winner_id=player_id) # 结束游戏
         else:
-            self.koikoi_flags[self.current_player] = 1
+            self.koikoi_flags[player_id] = 1
 
         return None
     

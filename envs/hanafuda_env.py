@@ -206,7 +206,13 @@ class HanafudaEnv(gym.Env):
         计算奖励。
         """
         if not self.rules.game_over:
-            return (latter_points - former_points) * 0.1
+            if self._turn_phase in [0,1]: # 出牌或抽牌阶段
+                return (latter_points - former_points) * 0.1
+            else: # 叫牌阶段
+                if self.rules.koikoi_flags[self.current_player] == 1: # 智能体叫牌
+                    return 0.5
+                else: # 智能体不叫牌，游戏结束
+                    return self.rules.yaku_points[self.current_player]
         else:
             if self.rules.game_result == self.current_player: # 智能体获胜
                 return self.rules.yaku_points[self.current_player]
