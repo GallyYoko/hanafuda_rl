@@ -210,7 +210,7 @@ class HanafudaEnv(gym.Env):
                 return (latter_points - former_points) * 0.1
             else: # 叫牌阶段
                 if self.rules.koikoi_flags[self.current_player] == 1: # 智能体叫牌
-                    return 0.5
+                    return 0.
                 else: # 智能体不叫牌，游戏结束
                     return self.rules.yaku_points[self.current_player]
         else:

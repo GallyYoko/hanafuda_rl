@@ -1,25 +1,19 @@
 from tqdm import tqdm
-import numpy as np
 
 from hanafuda_rl.envs.hanafuda_env import HanafudaEnv
 from hanafuda_rl.agents.random_agent import RandomAgent
-# 【关键修改】: 导入您定义的 PPOAgent 类
 from hanafuda_rl.agents.sb3_agent import PPOAgent 
-
-# --- 1. 配置评估 ---
 
 # 玩家0 (主要评估对象)
 AGENT_0_TYPE = 'ppo'
-AGENT_0_PATH = "Hanafuda-Project/hanafuda_rl/results/models/hanafuda_ppo_5.zip"
+AGENT_0_PATH = "Hanafuda-Project/hanafuda_rl/results/models/hanafuda_ppo_5M.zip"
 
 # 玩家1 (对手)
-AGENT_1_TYPE = 'ppo'
-AGENT_1_PATH = "Hanafuda-Project/hanafuda_rl/results/models/hanafuda_ppo_4.zip"
+AGENT_1_TYPE = 'random'
+AGENT_1_PATH = "Hanafuda-Project/hanafuda_rl/results/models/hanafuda_ppo_100K.zip"
 
 NUM_GAMES = 1000
 SEED = 99
-
-# --- 2. 评估函数 (双智能体对战模式) ---
 
 def evaluate_duel(agent0, agent1, num_games=1000, seed=None):
     """
@@ -32,19 +26,11 @@ def evaluate_duel(agent0, agent1, num_games=1000, seed=None):
     env = HanafudaEnv()
     
     stats = {"wins_agent0": 0, "wins_agent1": 0, "draws": 0, "total_score_agent0": 0}
-    
-    # 用一个固定的随机数生成器来决定每局的智能体角色分配
-    rng = np.random.default_rng(seed)
 
     for i in tqdm(range(num_games), desc="Evaluating Games"):
-        # 在每局游戏开始前，明确地、随机地分配哪个智能体扮演哪个玩家ID
-        # 这确保了长期来看，每个智能体扮演 P0 和 P1 的次数是均等的。
-        if rng.choice([True, False]):
-            player_mapping = {0: agent0, 1: agent1} # agent0 是 P0, agent1 是 P1
-        else:
-            player_mapping = {0: agent1, 1: agent0} # agent1 是 P0, agent0 是 P1
+        player_mapping = {0: agent0, 1: agent1} # agent0 是 P0, agent1 是 P1
 
-        obs, info = env.reset(seed=seed + i if seed is not None else None)
+        obs, _ = env.reset(seed=seed + i if seed is not None else None)
         terminated, truncated = False, False
         
         while not (terminated or truncated):
@@ -55,34 +41,25 @@ def evaluate_duel(agent0, agent1, num_games=1000, seed=None):
             active_agent = player_mapping[current_player_id]
             action = active_agent.select_action(obs, action_mask)
             
-            obs, _, terminated, truncated, info = env.step(action)
+            obs, _, terminated, truncated, _ = env.step(action)
 
-        # -- 记录结果 --
+        # 记录结果
         winner_id = env.unwrapped.rules.game_result
         if winner_id is not None and winner_id != -1: # 如果不是平局
             winner_agent = player_mapping[winner_id]
             if winner_agent is agent0:
                 stats["wins_agent0"] += 1
+                stats["total_score_agent0"] += env.unwrapped.rules.yaku_points[0]
             else:
                 stats["wins_agent1"] += 1
+                stats["total_score_agent0"] -= env.unwrapped.rules.yaku_points[1]
         else:
             stats["draws"] += 1
-
-        # 记录相对于 agent0 的净得分
-        p0_score = env.unwrapped.rules.yaku_points[0]
-        p1_score = env.unwrapped.rules.yaku_points[1]
-        net_score = p0_score - p1_score
-        # 如果 agent0 在这局是 P0，直接加上净分；如果是 P1，则减去净分
-        if player_mapping[0] is agent0:
-            stats["total_score_agent0"] += net_score
-        else:
-            stats["total_score_agent0"] -= net_score
 
     env.close()
     return stats
 
-# --- 3. 辅助函数，用于创建智能体 ---
-
+# 辅助函数，用于创建智能体
 def create_agent(agent_type, model_path, seed):
     """根据类型和路径创建智能体实例。"""
     if agent_type == "random":
@@ -93,8 +70,6 @@ def create_agent(agent_type, model_path, seed):
         return PPOAgent(model_path=model_path)
     else:
         raise ValueError(f"Unknown agent type: '{agent_type}'")
-
-# --- 4. 主执行函数 ---
 
 def main():
     """主执行函数"""
@@ -116,7 +91,7 @@ def main():
     print(f"Agent 0: {agent0.__class__.__name__} ({AGENT_0_TYPE.upper()})")
     if AGENT_0_TYPE == 'ppo': print(f"  - Model: {AGENT_0_PATH}")
     print(f"Agent 1: {agent1.__class__.__name__} ({AGENT_1_TYPE.upper()})")
-    if AGENT_1_TYPE == 'ppo': print(f"  - Model: {AGENT_0_PATH}")
+    if AGENT_1_TYPE == 'ppo': print(f"  - Model: {AGENT_1_PATH}")
     print(f"Total Games Played: {total_games}")
     print("-" * 40)
     print(f"Agent 0 Wins / Agent 1 Wins / Draws: {results['wins_agent0']} / {results['wins_agent1']} / {results['draws']}")
