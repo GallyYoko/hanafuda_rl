@@ -11,6 +11,7 @@ from stable_baselines3.common.monitor import Monitor
 # 导入花札环境和随机智能体
 from hanafuda_rl.envs.hanafuda_env import HanafudaEnv
 from hanafuda_rl.agents.random_agent import RandomAgent
+from hanafuda_rl.agents.sb3_agent import PPOAgent
 
 # --- 1. 定义一个包装器，用于处理“RL vs 对手”的逻辑 ---
 class SelfPlayEnvWrapper(gym.Wrapper):
@@ -38,7 +39,7 @@ class SelfPlayEnvWrapper(gym.Wrapper):
         # 如果开局是对手先手
         if self.env.unwrapped.current_player != self.rl_player_id:
             # 让对手一直玩，直到轮到我们
-            obs, _, _, _, info = self._opponent_play_until_our_turn(info)
+            obs, _, _, _, info = self._opponent_play_until_our_turn(obs, info)
         return obs, info
 
     def step(self, action):
@@ -51,21 +52,20 @@ class SelfPlayEnvWrapper(gym.Wrapper):
         # 如果游戏没有因RL智能体的动作而结束，并且轮到对手了
         opp_reward = 0.
         if not (terminated or truncated) and self.env.unwrapped.current_player != self.rl_player_id:
-            obs, opp_reward, terminated, truncated, info = self._opponent_play_until_our_turn(info)
+            obs, opp_reward, terminated, truncated, info = self._opponent_play_until_our_turn(obs, info)
 
         if terminated or truncated:
             reward = reward - opp_reward # 用对手的得分修正RL智能体的得分
         
         return obs, reward, terminated, truncated, info
 
-    def _opponent_play_until_our_turn(self, info):
+    def _opponent_play_until_our_turn(self, obs, info):
         """
         让对手一直行动，直到再次轮到RL智能体或者游戏结束。
         这个辅助函数返回完整的5元组，供 step 和 reset 方法内部使用。
         """
         last_reward = 0.
         terminated, truncated = False, False
-        obs = None # 在循环开始前初始化
 
         # 只要当前玩家是对手，并且游戏没有结束
         while self.env.unwrapped.current_player != self.rl_player_id:
@@ -98,18 +98,29 @@ N_STEPS = 2048
 N_ENVS = 10 # 多线程并行
 SEED = 99
 
+# 为自我对弈设置参数
+SELF_PLAY_ITERATIONS = 5 # 自我对弈的总迭代轮数
+STEPS_PER_ITERATION = TOTAL_TIMESTEPS // SELF_PLAY_ITERATIONS # 每轮迭代训练的步数
+
 # 一个辅助函数，用于创建和包装单个环境实例
-def make_env_func(rank, seed=99):
+def make_env_func(rank, seed=99, opponent_model_path=None):
     """
     一个辅助函数，返回一个创建环境的函数。
     这是 SubprocVecEnv 所需的格式。
     """
     def _init():
-        # 为每个环境设置不同的种子，以增加多样性
-        opponent_seed = seed + rank
         env_seed = seed + rank
 
-        opponent = RandomAgent(seed=opponent_seed)
+        # 动态决定对手
+        if opponent_model_path is None:
+            # 如果没有提供模型路径，则使用随机智能体（用于第一轮训练）
+            opponent_seed = seed + rank
+            opponent = RandomAgent(seed=opponent_seed)
+        else:
+            # 如果提供了模型路径，则加载该PPO模型作为对手
+            opponent = PPOAgent(model_path=opponent_model_path)
+
+        # 创建环境
         env = HanafudaEnv()
         env.reset(seed=env_seed)
         
@@ -121,52 +132,68 @@ def make_env_func(rank, seed=99):
     return _init
 
 def train_agent():
-    """主训练函数 (并行版)"""
+    """主训练函数"""
     
-    # 创建并包装环境
-    print(f"Creating and wrapping {N_ENVS} parallel environments...")
-    
-    # 创建一个包含多个环境的向量化环境
-    # 每个环境都在自己的进程中运行
-    vec_env = SubprocVecEnv([make_env_func(i, SEED) for i in range(N_ENVS)])
+    # 初始化模型和对手路径
+    model = None
+    opponent_path = None # 第一轮没有对手模型
 
-    # 定义模型
-    model = MaskablePPO(
-        MaskableMultiInputActorCriticPolicy,
-        vec_env,  # 将并行环境传递给模型
-        verbose=1,
-        tensorboard_log=LOG_DIR,
-        learning_rate=3e-4,
-        n_steps=N_STEPS,
-        batch_size=128, # 增加 batch_size
-        n_epochs=10,
-        gamma=0.99,
-        clip_range=0.2,
-    )
+    for i in range(SELF_PLAY_ITERATIONS):
+        print("="*50)
+        print(f"Starting Self-Play Iteration {i+1}/{SELF_PLAY_ITERATIONS}")
+        print(f"Opponent: {'RandomAgent' if opponent_path is None else opponent_path}")
+        print("="*50)
 
-    # 开始训练
-    print("="*30)
-    print(f"Starting parallel training ({N_ENVS} envs): RL Agent vs. RandomAgent")
-    print(f"Total Timesteps: {TOTAL_TIMESTEPS}")
-    print(f"Logs will be saved to: {LOG_DIR}/MaskablePPO_{TIMESTAMP}")
-    print("="*30)
-    
-    model.learn(
-        total_timesteps=TOTAL_TIMESTEPS,
-        tb_log_name=f"MaskablePPO_{TIMESTAMP}",
-        progress_bar=True
-    )
+        # 1. 根据当前对手创建并行环境
+        vec_env = SubprocVecEnv([make_env_func(rank, SEED, opponent_model_path=opponent_path) for rank in range(N_ENVS)])
 
-    # 保存模型
-    model_path = os.path.join(MODEL_DIR, f"hanafuda_ppo_{TOTAL_TIMESTEPS}.zip")
-    model.save(model_path)
-    print("="*30)
-    print("Training completed!")
-    print(f"Model saved to: {model_path}")
-    print("="*30)
+        # 2. 创建或更新模型
+        if model is None:
+            # 如果是第一次迭代，创建一个新模型
+            print("Creating a new MaskablePPO model...")
+            model = MaskablePPO(
+                MaskableMultiInputActorCriticPolicy,
+                vec_env,
+                verbose=1,
+                tensorboard_log=LOG_DIR,
+                learning_rate=3e-4,
+                n_steps=N_STEPS,
+                batch_size=128,
+                n_epochs=10,
+                gamma=0.99,
+                clip_range=0.2,
+            )
+        else:
+            # 如果不是第一次迭代，更新模型以使用新的环境（新的对手）
+            print("Updating model with new environment (new opponent)...")
+            model.set_env(vec_env)
 
-    # 关闭环境
-    vec_env.close()
+        # 3. 训练模型
+        # reset_num_timesteps=False 确保日志和总步数在迭代之间是连续的
+        model.learn(
+            total_timesteps=STEPS_PER_ITERATION,
+            tb_log_name=f"MaskablePPO_SelfPlay_{TIMESTAMP}",
+            progress_bar=True,
+            reset_num_timesteps=False 
+        )
+
+        # 4. 保存当前模型，它将成为下一轮的对手
+        current_model_path = os.path.join(MODEL_DIR, f"selfplay_models/hanafuda_ppo_iter_{i+1}.zip")
+        model.save(current_model_path)
+        print(f"Iteration {i+1} model saved to: {current_model_path}")
+
+        # 5. 更新对手路径以备下一轮使用
+        opponent_path = current_model_path
+
+        # 6. 关闭当前的环境，释放资源
+        vec_env.close()
+
+    print("="*50)
+    print("Self-Play training completed!")
+    final_model_path = os.path.join(MODEL_DIR, f"hanafuda_ppo_selfplay_{TOTAL_TIMESTEPS}.zip")
+    model.save(final_model_path)
+    print(f"Final model saved to: {final_model_path}")
+    print("="*50)
 
 if __name__ == '__main__':
     # 确保文件夹存在
