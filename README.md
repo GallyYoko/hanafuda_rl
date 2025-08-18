@@ -101,13 +101,13 @@ hanafuda_rl/
 | 超参数 | 值  | 解释  |
 | ------- | ------ | ------- |
 | `N_ENVS` | 10  | 并行线程数  |
-| `learning_rate` | `3e-4`  | 学习率 |
+| `learning_rate` | 3e-4  | 学习率 |
 | `n_steps` | 2048 | 更新前的采样步数 |
 | `batch_size` | 128  | 梯度下降时每个mini-batch的大小 |
 | `n_epochs` | 10 | 使用采样数据进行优化的轮数 |
 | `gamma`  | 0.99  | 折扣因子 |
 | `clip_range`  | 0.2  | PPO裁剪目标函数的范围 |
-| `TOTAL_TIMESTEPS` | `5,000,000` | 总训练步数 |
+| `TOTAL_TIMESTEPS` | 5,000,000 | 总训练步数 |
 
 ---
 
