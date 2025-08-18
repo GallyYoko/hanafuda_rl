@@ -7,11 +7,11 @@ from hanafuda_rl.agents.sb3_agent import PPOAgent
 
 # 玩家0 (主要评估对象)
 AGENT_0_TYPE = 'ppo'
-AGENT_0_PATH = "Hanafuda-Project/hanafuda_rl/results/models/hanafuda_ppo_selfplay_5M.zip"
+AGENT_0_PATH = "results/models/hanafuda_ppo_selfplay_5M.zip"
 
 # 玩家1 (对手)
 AGENT_1_TYPE = 'ppo'
-AGENT_1_PATH = "Hanafuda-Project/hanafuda_rl/results/models/hanafuda_ppo_selfplay_5M.zip"
+AGENT_1_PATH = "results/models/hanafuda_ppo_selfplay_5M.zip"
 
 NUM_GAMES = 10000
 SEED = 99

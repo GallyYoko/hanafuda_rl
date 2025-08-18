@@ -119,9 +119,9 @@ hanafuda_rl/
 
 ### **训练记录**
 *   **平均对局时长**
-![ep_len_mean](/result/figures/ep_len_mean.png)
+![ep_len_mean](/results/figures/ep_len_mean.png)
 *   **平均奖励**
-![ep_rew_mean](/result/figures/ep_rew_mean.png)
+![ep_rew_mean](/results/figures/ep_rew_mean.png)
 
 ---
 
