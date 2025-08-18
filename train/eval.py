@@ -2,17 +2,18 @@ from tqdm import tqdm
 
 from hanafuda_rl.envs.hanafuda_env import HanafudaEnv
 from hanafuda_rl.agents.random_agent import RandomAgent
+from hanafuda_rl.agents.rule_agent import RuleAgent
 from hanafuda_rl.agents.sb3_agent import PPOAgent 
 
 # 玩家0 (主要评估对象)
 AGENT_0_TYPE = 'ppo'
-AGENT_0_PATH = "Hanafuda-Project/hanafuda_rl/results/models/hanafuda_ppo_100K.zip"
+AGENT_0_PATH = "Hanafuda-Project/hanafuda_rl/results/models/hanafuda_ppo_selfplay_5M.zip"
 
 # 玩家1 (对手)
-AGENT_1_TYPE = 'random'
-AGENT_1_PATH = "Hanafuda-Project/hanafuda_rl/results/models/hanafuda_ppo_5M.zip"
+AGENT_1_TYPE = 'ppo'
+AGENT_1_PATH = "Hanafuda-Project/hanafuda_rl/results/models/hanafuda_ppo_selfplay_5M.zip"
 
-NUM_GAMES = 1000
+NUM_GAMES = 10000
 SEED = 99
 
 def evaluate_duel(agent0, agent1, num_games=1000, seed=None):
@@ -22,7 +23,7 @@ def evaluate_duel(agent0, agent1, num_games=1000, seed=None):
     2. 此函数通过明确的 `player_mapping` 确保 agent0 和 agent1
        在整个评估中被分配为玩家0和玩家1的次数相等。
     """
-    print(f"Starting fair duel: {agent0.__class__.__name__} vs. {agent1.__class__.__name__}")
+
     env = HanafudaEnv()
     
     stats = {"wins_agent0": 0, "wins_agent1": 0, "draws": 0, "total_score_agent0": 0}
@@ -68,6 +69,8 @@ def create_agent(agent_type, model_path, seed):
         if not model_path:
             raise ValueError("Must provide a model path for PPO agent.")
         return PPOAgent(model_path=model_path)
+    elif agent_type == "rule":
+        return RuleAgent()
     else:
         raise ValueError(f"Unknown agent type: '{agent_type}'")
 
